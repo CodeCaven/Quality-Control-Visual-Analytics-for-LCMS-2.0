@@ -1,27 +1,20 @@
 # MPMF Quality Control Server
 
-This is the GitLab repository for the MPMF QC Server.  
+This is the GitLab repository for the MPMF QC Server Version 2.0.  
+This is an active development project. Stay tuned for updates.  
 
 ### Install and Running
 * Set-up the QC database   
-https://gitlab.erc.monash.edu.au/scav6/Metabolomics-Quality-Control-Pipeline
 * Clone this repository
 * Run _npm install_ from the cloned directory.
 * Set database details in models/connection.js
 * Run _npm start_.
-* Navigate to http://localhost:3000
+* Navigate to http://localhost:3000 
 
+### Summary Page
+![load](REDESIGN-SummaryPage1.PNG)
 
-### Demonstration Video
-https://bit.ly/MPMFQC-Demo  
-
-### Loading Page
-![load](SCREEN-Splash.png)
-
-### Proteomics Page
-![proteomics](SCREEN-Proteomics.png)
-
-### Metabolomics Page
-![metabolomics](SCREEN-Metab.png)
+### Metabolomics Charts Page
+![metabolomics](REDESIGN-BoxPlot1.PNG)
 
 
