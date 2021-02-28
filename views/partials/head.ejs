@@ -1,0 +1,1533 @@
+<head>
+	<title>MPMF Quality Control</title>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
+	<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Poppins">
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+	<link rel="stylesheet" type="text/css" href="./stylesheets/style.css"  />
+	<script src="./javascripts/mbpfJS.js"></script>
+	<script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+	<!--<script type="text/javascript" src="./javascripts/googlecharts.js">-->
+	<script type="text/javascript">
+
+		// REFACTOR GENERAL
+		// - change vars to lets and 'use strict'
+		// - reorder function declarations
+		// - drawing functions structure
+		// - use (of) loops for arrays (or normal loops fastest) and (in) loops for objects
+
+		// NOTES
+		// all_negative, all_positive and update_checkboxes draw the charts
+		// they will call switchView if display view false
+		
+		google.charts.load('current', {packages: ['corechart','controls','table']});
+		google.charts.setOnLoadCallback(drawAll);
+
+		// line chart containers
+		var all_dashboards = [];
+		var all_datatables = [];
+		var all_boxes = [];
+		var all_sliders = [];
+		var all_chart_wrappers = [];
+		
+		// candle chart containers
+		var all_candle_charts = [];
+		var all_candle_datatables = [];
+		var all_candle_line_datables = []; // could add logic to use all_datatables
+		var all_candle_names = [];
+
+		// table containers
+		var all_tables_pos = [];
+		var all_tables_neg = [];
+		var all_tables_data = [];
+
+		// initialise state variables
+		var venue = "CLAYTON";
+		var machine = "QE CLASSIC";
+		var display_view = true; // true for dates, false for set interval
+		var current_view = "Mass Error (ppm)"; 
+
+		var start_count = 0; // init sliders check
+		
+		// create index lists for pos neg dataviews and checkboxes
+		var pos_indexes = [0]; // first column dates
+		var neg_indexes = [0];
+		var pos_indexes_table = [0];
+		var neg_indexes_table = [0];
+		var modes = "<%=v_modes%>".split(",");
+		var components = "<%=v_components%>".split(",");
+		var metrics = "<%=v_metrics%>".split(",");
+		var line_colours = [];
+		var components_dt_index = [];
+		var table_colours = "<%=v_table_colours%>".split(",");
+		var headings = document.getElementsByClassName('heading');
+		var line_overlays = document.getElementsByClassName('overlayLine');
+		var candle_overlays = document.getElementsByClassName('overlayCandle');
+		var table_overlays = document.getElementsByClassName('overlayTable');
+        var all_options = {}; // store the options used by each chart in each view (needed for cloning issues)
+		var all_options_switch = {};
+		var all_options_candles = {};
+
+		// create an object of component/modes for sorting by polarity (used by candles)
+		var comp_obj = {};
+		for(var i=0; i<components.length; i++){
+			comp_obj[components[i]] = modes[i];
+		}
+		
+		// create index list for components in datatables
+		for(var i =1; i < 51; i += 3){
+			components_dt_index.push(i);
+		}
+
+		// create list of pos and neg indexes
+		for(var i = 0; i<modes.length;i++){
+			if(modes[i] == 'P'){
+				pos_indexes_table.push(components_dt_index[i]);
+				pos_indexes.push(components_dt_index[i]);
+				pos_indexes.push(components_dt_index[i]+1); // ann
+				pos_indexes.push(components_dt_index[i]+2); // uncert
+			}
+			else if(modes[i] == 'N'){
+				neg_indexes_table.push(components_dt_index[i]);
+				neg_indexes.push(components_dt_index[i]);
+				neg_indexes.push(components_dt_index[i]+1); // ann
+				neg_indexes.push(components_dt_index[i]+2); //uncert
+			}
+		}
+
+		// add interval columns
+		pos_indexes.push(54);
+		pos_indexes.push(55);
+		neg_indexes.push(54);
+		neg_indexes.push(55);
+
+		// hide,show menus
+		function dropdown(id) {
+			var x = document.getElementById(id);
+			if (x.className.indexOf("w3-show") == -1) {
+				x.className += " w3-show";
+			} else { 
+				x.className = x.className.replace(" w3-show", "");
+			}
+		}
+
+		// scroll to top on load
+		$(document).ready(function(){
+			$(this).scrollTop(0);
+			$('#mySidebar').scrollTop(0);	
+		});
+
+		// scroll event
+		window.onscroll = function() {
+			setViewLabel()
+		};
+
+		// scroll call back
+		function setViewLabel(){
+		
+			for(var i=0; i<headings.length; i++){
+				if(isInViewport(headings[i])){
+					next_view = headings[i].innerHTML;
+				}
+			}
+			
+			if(next_view != current_view){
+				var view_label = document.getElementById('viewLabel');
+				view_label.innerHTML = "<strong>"+next_view+"</strong>";
+				current_view = next_view;
+			}
+		}
+        
+        // used by box plots to deterimine colour
+		function is_positive(name){
+			for (p_name in pos_names){
+				if(pos_names[p_name] == name){
+					return true;
+				}
+			}
+			return false;
+		}
+
+		/*!
+		* Determine if an element is in the viewport
+		* (c) 2017 Chris Ferdinandi, MIT License, https://gomakethings.com
+		* @param  {Node}    elem The element
+		* @return {Boolean}      Returns true if element is in the viewport
+		*/
+		// https://vanillajstoolkit.com/helpers/isinviewport/
+		var isInViewport = function (elem) {
+			var distance = elem.getBoundingClientRect();
+			return (
+				distance.top >= 0 &&
+				distance.left >= 0 &&
+				distance.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
+				distance.right <= (window.innerWidth || document.documentElement.clientWidth)
+			);
+		};
+		
+		// DOM loaded callback
+		document.addEventListener('DOMContentLoaded', function() {
+			
+			// control checkboxes event listeners 
+			control_boxes = document.getElementsByName('allControls');
+			init(control_boxes);
+			
+			// plus initial set to pos/neg
+			for (var i = 0; i < control_boxes.length; i++) {
+				control_boxes[i].addEventListener('click', updateControl);
+				if(control_boxes[i].id[0] == 'N'){
+						control_boxes[i].checked = true;
+					}
+			}
+			
+		}, false);
+
+		// callback for control checkboxes
+		function updateControl(sender){
+
+			var view_cols = [0]; 
+			var box_cols = []; // the order of checkboxes is diff than components 
+
+			// find id and index of checked control box
+			for(var i = 0; i<control_boxes.length; i++){
+				if(sender.target.id == control_boxes[i].id){
+					var sender_index = i;
+				}
+			}
+
+			// find indexes of checked components
+			for (var i = 0; i < control_boxes.length; i++) {
+				if(control_boxes[i].checked){
+					var comp = control_boxes[i].id.substr(2);
+					var col = find_column_index(comp);
+					view_cols.push(col);
+					view_cols.push(col+1); // ann
+					view_cols.push(col+2); // uncertainty
+					box_cols.push(i);
+				}
+			}
+			
+			// update all charts
+			if(view_cols.length != 1){
+
+				// loading overlays
+				for(var i = 0; i<line_overlays.length; i++){
+					line_overlays[i].style.display = 'block';
+				}
+
+				// add interval columns
+				view_cols.push(54);
+				view_cols.push(55);
+
+				for(var i = 0; i<all_dashboards.length; i++){
+					init(all_boxes[i]);
+					update_checkboxes(all_datatables[i], all_sliders[i], all_dashboards[i], all_chart_wrappers[i], view_cols, false);
+
+					// check the chart boxes 
+					for(var j = 0; j<box_cols.length; j++){
+						all_boxes[i][box_cols[j]].checked = true;
+					}
+				}
+			}
+			// handle zero boxes
+			else{
+				control_boxes[sender_index].checked = true;
+			}
+		}
+
+		function addAllOverlays(){
+			// loading overlays line charts
+			for(var i = 0; i<line_overlays.length; i++){
+				line_overlays[i].style.display = 'block';
+			}
+
+			// loading overlays table charts
+			for(var i = 0; i<table_overlays.length; i++){
+				table_overlays[i].style.display = 'block';
+			}
+			
+			// loading overlays candle charts 
+			var candle_overlays = document.getElementsByClassName('overlayCandle');
+			for(var i = 0; i<candle_overlays.length; i++){
+				candle_overlays[i].style.display = 'block';
+			}
+
+		}
+
+		function change(sender){
+
+			// loading overlays
+			addAllOverlays();
+
+			// determine buuton clicked and load new charts
+			var buttonType = sender.parentNode.id;
+		
+			if(buttonType == 'venue'){
+				venue = sender.innerHTML;
+				var header = document.getElementById('venueHeader');
+				header.innerHTML = venue;
+			}
+			else if(buttonType == 'machine'){
+				machine= sender.innerHTML;
+				var header = document.getElementById('machineHeader');
+				header.innerHTML = machine;
+
+			}
+
+			// half second delay to see overlays
+			setTimeout(changeAllCharts, 500);
+
+		}
+		
+		// callback for venue dropdown
+		function changeAllCharts(){
+
+			// update line charts
+			// update control boxes
+			for(var i = 0; i<all_dashboards.length; i++){
+				init(all_boxes[i]); //(dt, dS, dash, checks, cw)
+				all_negative(all_datatables[i], all_sliders[i], all_dashboards[i], all_boxes[i], all_chart_wrappers[i], false);
+			}
+
+			// check the control boxes
+			init(control_boxes);
+			for(var j = 0; j<control_boxes.length; j++){
+				if(control_boxes[j].id[0] == 'N'){
+					control_boxes[j].checked = true;
+				}
+			}
+			
+			// update candle charts
+			for(var i = 0; i<all_candle_charts.length; i++){
+				draw_candle(all_candle_charts[i], all_candle_datatables[i], all_candle_line_datables[i], all_candle_names[i]);
+			}
+
+			// update the heat maps
+			for(var i = 0; i<all_tables_neg.length; i++){
+				draw_table(all_tables_data[i], all_tables_neg[i], 'N', -1);
+				draw_table(all_tables_data[i], all_tables_pos[i], 'P', -1);
+			}	
+		}
+
+		// callback for all charts button control 
+		function allCharts(charge){
+
+			// loading overlays
+			for(var i = 0; i<line_overlays.length; i++){
+				line_overlays[i].style.display = 'block';
+			}
+
+			if(charge == 'P'){
+				for(var i = 0; i<all_dashboards.length; i++){
+					init(all_boxes[i]);
+					all_positive(all_datatables[i], all_sliders[i], all_dashboards[i], all_boxes[i], all_chart_wrappers[i], true);
+				}
+			}
+			else if(charge == 'N'){
+				for(var i = 0; i<all_dashboards.length; i++){
+					init(all_boxes[i]);
+					all_negative(all_datatables[i], all_sliders[i], all_dashboards[i], all_boxes[i], all_chart_wrappers[i], true);
+				}
+			}
+			
+			// check the control boxes
+			init(control_boxes);
+			for(var i = 0; i<control_boxes.length; i++){
+				if(control_boxes[i].id[0] == charge){
+					control_boxes[i].checked = true;
+				}
+			}
+		}
+
+		// set all checks to false
+		function init(checks){
+			for (var i = 0; i < checks.length; i++) {
+				checks[i].checked = false;
+			}
+		}
+
+		// datatable, dateslider,dashboard,checkboxes, chart wrappers, param(machine/venue)
+		// REFACToR: pass in i instead of arrays ??
+		function all_positive(dt, dS, dash, checks, cw, param){
+			if(display_view){
+
+				// set options
+				//cw.setOptions(chartOptions);
+				dS.setOptions(datepickerOptions);
+
+				var view = new google.visualization.DataView(dt);
+
+				// filter by venue
+				view.setRows(view.getFilteredRows([{column: 52, value:venue}]));
+				
+				// filter rows by machine (add if used)
+
+				// filter by pos_indexes
+				view.setColumns(pos_indexes);
+				
+				// set state of date slider(init only) and draw the dashboard
+				if (start_count < metrics.length){
+					var last_date = new Date(view.getFormattedValue(view.getNumberOfRows()-1,0));
+					var first_date = new Date(view.getFormattedValue(view.getNumberOfRows()-21,0));
+					dS.setState({range:{'start': first_date, 'end': last_date}});
+					start_count ++;
+				}
+				
+				// false for venue and machine
+				if(!param){
+					dS.setState({range:{'start': view.getValue(view.getNumberOfRows() - 21, 0), 'end': view.getValue(view.getNumberOfRows() - 1,0)}});
+				}
+
+				dash.draw(view);
+			}
+			else{
+				if(!param){ // change of venue
+					switchView(dt, cw, dS, dash, pos_indexes, dS.getState().range.start, dS.getState().range.end, true);
+				} else{
+					switchView(dt, cw, dS, dash, pos_indexes, dS.getState().range.start, dS.getState().range.end, false);
+				}
+			}
+
+			// check the boxes
+			for (var i = 0; i < checks.length; i++) {
+				if(checks[i].id[0] == 'P'){
+					checks[i].checked = true;
+				}
+			}	
+		}
+		
+		// Also used by change of venue/machine
+		// REFACToR: pass in i instead of arrays??
+		function all_negative(dt, dS, dash, checks, cw, param){
+			if(display_view){
+
+				// set options
+				//cw.setOptions(chartOptionsTemplate);
+				dS.setOptions(datepickerOptions);
+
+				var view = new google.visualization.DataView(dt);
+				
+				// filter by venue
+				view.setRows(view.getFilteredRows([{column: 52, value:venue}]));
+
+				// filter rows by machine (add if used)
+
+				// filter by neg_indexes
+				view.setColumns(neg_indexes);
+
+				// set state of date slider and draw the dashboard
+				
+				if(start_count < metrics.length){
+					var last_date = new Date(view.getValue(view.getNumberOfRows()-1,0));
+					var first_date = new Date(view.getValue(view.getNumberOfRows()-21,0));
+					dS.setState({range:{'start': first_date, 'end': last_date}});
+					start_count ++;
+				}
+
+				// reset sliders for venue machine change
+				if(!param){
+					dS.setState({range:{'start': view.getValue(view.getNumberOfRows() - 21, 0), 'end': view.getValue(view.getNumberOfRows() - 1,0)}});
+				}
+				dash.draw(view);
+			}
+			else{
+				if(!param){ // change of venue
+					switchView(dt, cw, dS, dash, neg_indexes, dS.getState().range.start, dS.getState().range.end, true);
+				} else{
+					switchView(dt, cw, dS, dash, neg_indexes, dS.getState().range.start, dS.getState().range.end, false);
+				}
+			}
+
+			// check the boxes
+			for (var i = 0; i < checks.length; i++) {
+				if(checks[i].id[0] == 'N'){
+					checks[i].checked = true;
+				}
+			}
+		}
+
+		// Also used by change of view (param true)
+		// REFACToR: pass in i instead of arrays
+		function update_checkboxes(dt, dS, dash, cw, vcols, param){
+
+			// add interval columns
+			vcols.push(54);
+			vcols.push(55);
+
+			if(display_view){
+
+				// set options
+				//cw.setOptions(chartOptionsTemplate);
+				dS.setOptions(datepickerOptions);
+
+				// create view
+				var view = new google.visualization.DataView(dt);
+
+				// filter by venue
+				view.setRows(view.getFilteredRows([{column: 52, value:venue}]));
+
+				// filter rows by machine (add if used)
+
+				// filter component columns (with annotations)
+				view.setColumns(vcols);
+
+				// switch back to normal view slider reset 
+				// (google charts will return floats...parse int!)
+				if(param){
+					dS.setState({range:{'start': view.getValue(parseInt(dS.getState().range.start), 0), 'end': view.getValue(parseInt(dS.getState().range.end), 0)}});
+				}
+				dash.draw(view);
+			}
+			else{
+				switchView(dt, cw, dS, dash, vcols,dS.getState().range.start, dS.getState().range.end, false);
+			}
+		}
+		
+		// used by checkboxes in update
+		function find_column_index(component){
+			for(var i = 0; i < components.length; i++){
+				if(components[i] == component){
+					return components_dt_index[i];
+				}
+			}
+			return false;
+		}
+
+		// update date sliders for all charts
+		function update_sliders(start, end){
+
+			// loading overlays
+			for(var i = 0; i<line_overlays.length; i++){
+				line_overlays[i].style.display = 'block';
+			}
+
+			for(var i =0; i < all_dashboards.length; i ++){
+				
+				var view_cols = [0]; 
+				// find indexes of checked components
+				for (var j = 0; j < all_boxes[i].length; j++) {
+					if(all_boxes[i][j].checked){
+						var comp = all_boxes[i][j].id.substr(2);
+						var col = find_column_index(comp);
+						view_cols.push(col);
+						view_cols.push(col+1); //ann
+						view_cols.push(col+2); // uncertainty
+					}
+				}
+
+				// add interval columns
+				view_cols.push(54);
+				view_cols.push(55);
+
+				if(display_view){
+					// create view
+					var view = new google.visualization.DataView(all_datatables[i]);
+
+					// filter by venue
+					view.setRows(view.getFilteredRows([{column: 52, value:venue}]));
+
+					// filter rows by machine (add if used)
+
+					// filter component columns,set state of slider and draw
+					view.setColumns(view_cols);
+					
+					// set slider and redraw
+					all_sliders[i].setState({range:{'start': start, 'end': end}});
+					all_dashboards[i].draw(view);
+				}
+				else{
+					switchView(all_datatables[i], all_chart_wrappers[i], all_sliders[i], all_dashboards[i], view_cols, start, end, false);
+				}
+			}
+		}
+		
+		// draw the box plots and last run 
+		function draw_candle(c_chart, candle, ch_data, metric_name){
+				//console.log(metric_name);
+				var line_data_view =  new google.visualization.DataView(ch_data);
+				var view = new google.visualization.DataView(candle, true);
+				
+				// filter by venue
+				line_data_view.setRows(line_data_view.getFilteredRows([{column: 52, value:venue}]));
+				view.setRows(view.getFilteredRows([{column: 4, value:venue}]));
+				
+			
+				// filter rows by machine (add if used)
+
+				// convert to data table for write
+				var view_data_table = view.toDataTable();
+
+				// add column for last run line data
+				var date = line_data_view.getValue(line_data_view.getNumberOfRows()-1, 0).toString().slice(0,25); // so legend displays date
+				view_data_table.insertColumn(2, 'number', date);
+                view_data_table.insertColumn(3, {type:'string', role:'style'});
+				offset = 0; // for ann columns and certainty
+				for(var i = 1; i < line_data_view.getNumberOfColumns()-4; i+=3){
+					var last_run = line_data_view.getValue(line_data_view.getNumberOfRows()-1, i);
+					//console.log(last_run);
+					// handle missed values (needs testing)
+					if(last_run === null){
+						last_run = 0;
+					}
+					view_data_table.setValue(i-1 - offset, 2, last_run);
+                    if(is_positive(view_data_table.getValue(i-1 - offset, 0))){
+						view_data_table.setValue(i-1 - offset, 3, 'point { size: 7; shape-type: diamond; fill-color: #DC3912; }');
+					}
+					else{
+						view_data_table.setValue(i-1 - offset, 3, 'point { size: 7; shape-type: diamond; fill-color: #109618; }');
+					offset +=2;
+				}
+				
+				// convert back to view for filtering
+				var view = new google.visualization.DataView(view_data_table, true);
+
+				// select columns for box plot and line
+				view.setColumns([0,1,2,3,4,5]);
+
+				// sort by median desc
+				view.setRows(view.getSortedRows({column: 1, desc: true}));
+
+				
+				// NOTE: filtering a view using set rows will filter from the data table it
+				//       was created from, so need to convert to data table to "persist" view changes
+
+				// back to datatable to persist median sort
+				var view_data_table = view.toDataTable();
+				
+				// create view for polarity filtering and final display
+				var view = new google.visualization.DataView(view_data_table, true);
+
+				// sort by polarity
+				view.setRows(polarity_sort(view_data_table));
+
+				// filter for individual charts if needed
+				//view.setRows(view.getFilteredRows([{column: 0, value:'HEPES'}]));
+                
+                // options dict for candles
+				var title = '';
+				all_options_candles[metric_name] =  JSON.parse(JSON.stringify(candleOptionsTemplate));
+
+				if(metric_name == 'Mass Error (ppm)'){
+					title = "ppm";
+				}
+				else if(metric_name == 'Mass Error (mDa)'){
+					title = "mDa";
+				}
+				else if(metric_name == 'Retention Time'){
+					title = "Minutes";
+				}
+				else if(metric_name == 'Area (normalised)'){
+					title = "log_2(area)/" + "\n" +"(median_area)";
+				}
+				else if(metric_name == 'Height (normalised)'){
+					title = "log_2(height)/" + "\n" +"(median_height)";
+				}
+				all_options_candles[metric_name].vAxis.title = title;
+
+				// draw the candle chart with line
+				c_chart.draw(view, all_options_candles[metric_name]);
+
+				function polarity_sort(unsorted){
+					// function to sort by pos the neg
+					// could probably refactor for an insertion sort complexity
+					// by removing double loop...if time!
+
+					sorted_rows = [];
+					
+					// loop for pos indexes
+					for(var i = 0; i < unsorted.getNumberOfRows(); i+=1){
+						var comp = unsorted.getValue(i, 0);
+						if (comp_obj[comp] == 'P'){
+							sorted_rows.push(i);
+						}
+					}
+
+					// loop for neg indexes
+					for(var i = 0; i < unsorted.getNumberOfRows(); i+=1){
+						var comp = unsorted.getValue(i, 0);
+						if (comp_obj[comp] == 'N'){
+							sorted_rows.push(i);
+						}
+					}
+
+					return sorted_rows;
+				}
+			}
+		}
+		
+		function draw_table(dt, table, type, page){
+			var table_view = new google.visualization.DataView(dt);
+
+			// filter by venue
+			table_view.setRows(table_view.getFilteredRows([{column: 52, value:venue}]));
+				
+			// filter rows by machine (add if used)
+
+			// filter by table columns
+			if(type == 'P'){
+				table_view.setColumns(pos_indexes_table);
+				
+			}else if(type == 'N'){
+				table_view.setColumns(neg_indexes_table);
+			}
+			
+			if(page > -1){
+				tableOptions['startPage'] = page;
+			}
+			else{
+				tableOptions['startPage'] = 0;
+			}
+
+			table.draw(table_view, tableOptions);
+		}
+
+		// Main function to draw charts initially, run for each metric displayed once
+		function drawChart(chart_data, metric, box_data) {
+
+			// get metric name from index
+			var mname = metrics[metric];
+			//console.log(mname);
+
+			// Create dashboard instance
+			var dashboard = new google.visualization.Dashboard(document.getElementById('dash_' + mname));
+
+			// Create the line data
+			var data = new google.visualization.DataTable();
+			
+			data.addColumn({type:'datetime' ,label:'Date Time'});
+
+			for(var comp in components){
+				data.addColumn({type: 'number', role: 'data', label:components[comp]});
+				data.addColumn({type: 'string', role: 'annotation'});
+				data.addColumn({type: 'boolean', role: 'certainty'});
+			}
+			data.addColumn('string', 'venue name');
+			data.addColumn('string', 'machine name');
+			data.addColumn({type : 'number', role :'interval'});
+			data.addColumn({type : 'number', role :'interval'});
+
+			// debug 2018-12-27T11:54:10.000Z has 53 cols row 199???..missed value not picking up server end
+			//console.log(chart_data);
+			data.addRows(chart_data);
+
+			// date slider control wrapper
+			var dateSlider = new google.visualization.ControlWrapper({
+				controlType: 'ChartRangeFilter',
+				containerId: 'datecontrol_' + mname
+			});
+
+			dateSlider.setOptions(datepickerOptions);
+
+			// event for slider changes
+			google.visualization.events.addListener(dateSlider, 'statechange', function(event){
+				if(!event.inProgress){
+					update_sliders(dateSlider.getState().range.start,dateSlider.getState().range.end);
+				}
+			});
+			
+			// chart wrapper for line chart
+			var lineChart = new google.visualization.ChartWrapper({
+				chartType: 'LineChart',
+				containerId: 'chart_' + mname
+			});
+
+			// set vaxis from template options and store as individual objects (else cloning issues)
+			// do switch view options as here as well
+			var title = '';
+			all_options[mname] =  JSON.parse(JSON.stringify(chartOptionsTemplate));;
+			all_options_switch[mname] =  JSON.parse(JSON.stringify(changeViewOptionsTemplate));
+
+			if(mname == 'Mass Error (ppm)'){
+				title = "ppm";
+			}
+			else if(mname == 'Mass Error (mDa)'){
+				title = "mDa";
+			}
+			else if(mname == 'Retention Time'){
+				title = "Minutes";
+			}
+			else if(mname == 'Area (normalised)'){
+				title = "log_2(area)/" + "\n" +"(median_area)";
+			}
+			else if(mname == 'Height (normalised)'){
+				title = "log_2(height)/" + "\n" +"(median_height)";
+			}
+			all_options[mname].vAxis.title = title;
+			all_options_switch[mname].vAxis.title = title;
+
+			if(display_view){
+				lineChart.setOptions(all_options[mname]);
+			}
+			else{
+				lineChart.setOptions(all_options_switch[mname]);
+			}
+
+			// event for ready, loading logic
+			// find its overlay and set display to none
+			google.visualization.events.addListener(lineChart, 'ready', function(){
+
+				var chart_id = lineChart.getContainerId().slice(6, lineChart.getContainerId().length);
+				//console.log(chart_id);
+				for(var i = 0; i<line_overlays.length; i++){
+					var overlay_id = line_overlays[i].id.slice(8, line_overlays[i].id.length);
+					if (overlay_id == chart_id){
+						line_overlays[i].style.display = 'none';
+						//console.log(line_overlays[i]);
+					}
+				}
+			});
+
+			// event for chart changes explorer sync
+			// see https://stackoverflow.com/questions/42235369/detect-zoom-event-for-a-google-line-chart
+			google.visualization.events.addListener(lineChart, 'select', function(event){
+				console.log(lineChart.getChart().getChartLayoutInterface());
+				console.log(event);
+			});
+
+			// checkboxes event listeners
+			var boxes = document.getElementsByName('components_'+ mname);
+			for (var i = 0; i < boxes.length; i++) {
+				boxes[i].addEventListener('click', update);
+			}
+		
+			// pos button listener
+			var pos_button = document.getElementById('Pos_'+ mname);
+			pos_button.addEventListener('click', buttonUpdatePos);
+
+			// neg button listener
+			var pos_button = document.getElementById('Neg_'+ mname);
+			pos_button.addEventListener('click', buttonUpdateNeg);
+
+			// button callbacks
+			function buttonUpdatePos(sender){
+
+				//loading overlay
+				var chart_id = sender.target.id.slice(4, sender.target.id.length);
+				for(var i = 0; i<line_overlays.length; i++){
+					var overlay_id = line_overlays[i].id.slice(8, line_overlays[i].id.length);
+					if (overlay_id == chart_id){
+						line_overlays[i].style.display = 'block';
+						
+					}
+				}
+				init(boxes);
+				all_positive(data, dateSlider, dashboard, boxes, lineChart, true);
+			}
+
+			function buttonUpdateNeg(sender){
+
+				//loading overlay
+				var chart_id = sender.target.id.slice(4, sender.target.id.length);
+				for(var i = 0; i<line_overlays.length; i++){
+					var overlay_id = line_overlays[i].id.slice(8, line_overlays[i].id.length);
+					if (overlay_id == chart_id){
+						line_overlays[i].style.display = 'block';
+						
+					}
+				}
+				init(boxes);
+				all_negative(data, dateSlider, dashboard, boxes, lineChart, true);
+			}
+			
+			// callback for checkboxes to redraw chart
+			function update(sender){
+
+				var view_cols = [0]; 
+				
+				// find id and index of checked box
+				for(var i = 0; i<boxes.length; i++){
+					if(sender.target.id == boxes[i].id){
+						var sender_index = i;
+					}
+				}
+
+				// find indexes of checked components
+				for (var i = 0; i < boxes.length; i++) {
+					if(boxes[i].checked){
+						var comp = boxes[i].id.substr(2);
+						var col = find_column_index(comp);
+						view_cols.push(col);
+						view_cols.push(col+1); // add its annotation column
+						view_cols.push(col+2); // uncertainty
+					}
+				}
+				
+				// handle zero checkboxes
+				if(view_cols.length == 1){
+					boxes[sender_index].checked = true; // recheck the box
+				}
+				else{
+					
+					//loading overlay
+					var chart_id = sender.target.name.slice(11, sender.target.name.length);
+					for(var i = 0; i<line_overlays.length; i++){
+						var overlay_id = line_overlays[i].id.slice(8, line_overlays[i].id.length);
+						if (overlay_id == chart_id){
+							line_overlays[i].style.display = 'block';
+						}
+					}
+					update_checkboxes(data, dateSlider, dashboard, lineChart, view_cols, false);
+				}
+			}
+			
+			// bind dashboard elements and draw (controls, charts)
+			dashboard.bind(dateSlider, lineChart);
+
+			// collect dashboards and data tables..
+			all_dashboards.push(dashboard);
+			all_datatables.push(data);
+			all_boxes.push(boxes);
+			all_sliders.push(dateSlider);
+			all_chart_wrappers.push(lineChart);
+
+			// initial display
+			init(boxes);
+			all_negative(data, dateSlider, dashboard, boxes, lineChart, true);
+
+			// Candle charts create and draw
+			if(box_data.length > 0){
+				var candle_data = new google.visualization.DataTable();
+				
+				candle_data.addColumn('string', 'component name');
+				candle_data.addColumn('number', 'Median');
+				candle_data.addColumn({type : 'number', role :'interval'});
+				candle_data.addColumn({type : 'number', role :'interval'});
+				candle_data.addColumn('string', 'venue name');
+				candle_data.addColumn('string', 'machine name');
+				candle_data.addRows(box_data);
+
+				// candle chart
+				var candle_chart = new google.visualization.ScatterChart(document.getElementById('candle_' + mname));
+				
+				// event for ready, loading logic
+				// find its overlay and set display to none
+				google.visualization.events.addListener(candle_chart, 'ready', function(){
+					var chart_id = candle_chart.container.id.slice(7, candle_chart.container.id.length);
+					for(var i = 0; i<candle_overlays.length; i++){
+						var overlay_id = candle_overlays[i].id.slice(14, candle_overlays[i].id.length);
+						if (overlay_id == chart_id){
+							candle_overlays[i].style.display = 'none';
+						}
+					}
+				});
+				//console.log(candle_data.toJSON());
+				draw_candle(candle_chart, candle_data, data, mname);
+				
+				// store candle info
+				all_candle_charts.push(candle_chart);
+				all_candle_datatables.push(candle_data);
+				all_candle_line_datables.push(data);
+				all_candle_names.push(mname);
+
+			}else{
+				// HEAT MAPS
+
+				// Scales
+				var scale_data = new google.visualization.DataTable();
+
+				for(var i = 0; i<table_colours.length; i++){
+					scale_data.addColumn('string');
+				}
+				scale_data.addRows(1);
+
+				// scale display, changed to strings (not needed in end), last number is formatted below for display
+				var cell_data = ["-4", "-2.5", "-1.5", "-0.9", "-0.7", "-0.5", "-0.3", "-0.15", "0.0", "0.15", "0.3", "0.5", "0.7", "0.9", "1.5", "2.5", "4.0"];
+
+				// 18 colour ranges
+				var scale_range = [-1000, -3.0001, -2.0001, -1.0001, -0.8001, -0.6001, -0.4001, -0.2001, -0.1001, 0.1001, 0.2001, 0.4001, 0.6001, 0.8001, 1.0001, 2.0001, 3.0001, 1000]
+
+				// colours for map, change ranges
+				var formatter = new google.visualization.ColorFormat();
+				for(var i =0; i < table_colours.length; i++){
+					formatter.addRange(scale_range[i], scale_range[i+1], table_colours[i], table_colours[i]);
+				}
+
+				// diff. for scale table
+				var scale_formatter = new google.visualization.ColorFormat();
+				for(var i =0; i < table_colours.length; i++){
+					scale_formatter.addRange(scale_range[i], scale_range[i+1], 'black', table_colours[i]);
+				}
+
+				// date formatter
+				var date_formatter = new google.visualization.DateFormat({pattern: "MMM dd, yy"});
+				date_formatter.format(data,0);
+				
+				var table_scale_view = new google.visualization.DataView(scale_data);
+				
+				// apply colour formats
+				for(i=1; i<data.getNumberOfColumns()-2; i+=3){
+					formatter.format(data, i);
+				}
+
+				// add scale data and formatting
+				for(var i = 0; i<cell_data.length; i++){
+					scale_data.setCell(0, i, cell_data[i]);
+					scale_formatter.format(scale_data, i);
+				}
+				
+				// change display in scale
+				scale_data.setFormattedValue(0, cell_data.length - 1, ">3");
+				scale_data.setFormattedValue(0, 0, "<-3");
+				
+				// draw the scale
+				var table_scale = new google.visualization.Table(document.getElementById('table_scale' + mname));
+				table_scale.draw(table_scale_view, tableScaleOptions);
+				
+				// create the tables
+				var table_pos = new google.visualization.Table(document.getElementById('table_P' + mname));
+				var table_neg = new google.visualization.Table(document.getElementById('table_N' + mname));
+
+				// page change events
+				google.visualization.events.addListener(table_pos, 'page', function(event){
+					draw_table(data, table_neg, 'N', event.page);
+				});
+
+				google.visualization.events.addListener(table_neg, 'page', function(event){
+					draw_table(data, table_pos, 'P', event.page);
+				});
+
+				// event for ready, loading logic POS
+				// find its overlay and set display to none, works here but not in change view/machine
+				google.visualization.events.addListener(table_pos, 'ready', function(){
+					var chart_id = table_pos.container.id.slice(6, table_pos.container.id.length);
+					//console.log(chart_id);
+					for(var i = 0; i<table_overlays.length; i++){
+						var overlay_id = table_overlays[i].id.slice(13, table_overlays[i].id.length);
+						//console.log(overlay_id);
+						if (overlay_id == chart_id){
+							table_overlays[i].style.display = 'none';
+						}
+					}
+				});
+
+				// event for ready, loading logic NEG
+				// find its overlay and set display to none, works here but not in change view/machine
+				google.visualization.events.addListener(table_neg, 'ready', function(){
+					var chart_id = table_neg.container.id.slice(6, table_neg.container.id.length);
+					for(var i = 0; i<table_overlays.length; i++){
+						var overlay_id = table_overlays[i].id.slice(13, table_overlays[i].id.length);
+						if (overlay_id == chart_id){
+							table_overlays[i].style.display = 'none';
+						}
+					}
+				});
+				
+				// draw the tables
+				draw_table(data, table_pos, 'P', -1);
+				draw_table(data, table_neg, 'N', -1);
+
+				// store for updates
+				all_tables_pos.push(table_pos);
+				all_tables_neg.push(table_neg);
+				all_tables_data.push(data);
+			}	
+		}
+		
+		// on ready first function called
+		function drawAll() {
+		
+			// calls drawChart for data per metric
+			// NOTE: js months start at 0, check for this
+			// NOTE: ejs can't comment out code !
+			// REFACTOR NOTE: use toPrimitive (or toString,valueOf) in objects for conversion behaviour (Python class style)
+			//				: used to disply an object
+			// TESTING: correct nulls for metrics
+
+			var index = -1;
+			<%for (ckey in v_data) {%>
+				index ++;
+
+				// create line chart table
+				var chart_table = [];
+				<%for (var i = 0; i < v_data[ckey].length; i++) {%>
+					var line = "<%=v_data[ckey][i]%>".split(",");
+					
+					
+					// convert strings to Dates and Numbers (except venue and machine and nulls)
+					line[0] = new Date(line[0]);
+					
+					for(var j = 1; j < line.length-4; j+=3){ // increment by 3
+						if(line[j] == ""){
+							line[j] = chart_table[chart_table.length-1][j]; // set to last value
+							// could cause issues if 2 missed in a row but should be OK
+						}
+						else{
+							line[j] = parseFloat(line[j]);
+						}
+					}
+					
+					// parse intervals (last 2 cols)
+					for(var j = line.length-2; j < line.length; j++){ 
+						//console.log(line[j]);
+						line[j] = parseFloat(line[j]);
+					}
+					
+					// convert nulls back to actual nulls RF
+					for(var j = 2; j < line.length-4; j+=3){ // increment by 3
+						if(line[j] != 'M'){
+							line[j] = null;
+						}
+					}
+
+					// convert booleans back to booleans RF
+					for(var j = 3; j < line.length-4; j+=3){ // increment by 3
+						if(line[j] == 'true'){
+							line[j] = true;
+						}
+						else{
+							line[j] = false;
+						}
+					}
+					//console.log(line);
+					//console.log(line.length);
+					chart_table.push(line);
+				<%}%>
+
+				// create box chart data
+				var box_table = [];
+				<%if (ckey != 'Area (normalised)'){%> 
+					<% if (ckey != 'Height (normalised)'){%>
+						<%for (var i = 0; i < v_box_data[ckey].length; i++) {%>
+							var box_line = "<%=v_box_data[ckey][i]%>".split(",");
+							// convert strings to Numbers (except venue and machine)
+							for(var j = 1; j < box_line.length-2; j++){
+								box_line[j] = parseFloat(box_line[j]);
+							}
+							box_table.push(box_line);
+						<%}%>	
+					<%}%>
+					
+				<%}%>
+				//console.log(box_table);
+				drawChart(chart_table, index, box_table);
+			<%}%>  
+
+			}
+
+			// SWITCH VIEW
+			// Function to draw display_view=false interval dates
+			// All drawing functions will call this function to handle display_view=false
+			// REFACTOR: options logic to just chnaging object like table page events
+			// 			: pass in i
+
+			function switchView(dt, cw, ds, dash, indexes, start, end, cv){ // datatable, chart wrapper, dateslider, dashboard, 
+				var view = new google.visualization.DataView(dt);
+				var hticks = [];
+				var count = -1;
+                var switch_name = cw.gv.substr(6);
+
+				// filter by venue
+				view.setRows(view.getFilteredRows([{column: 52, value:venue}]));
+
+				var cols = [];
+				for(var i = 1; i< dt.getNumberOfColumns(); i+=1){
+					cols.push(i);
+				}
+				
+				// add column of numbers
+				cols.unshift({type: 'number', label: dt.getColumnLabel(0), calc: getDomain});
+				
+				// set new view with number domain instead of dates
+				view.setColumns(cols);
+
+				// convert to dt 
+				var view_data_table = view.toDataTable();
+
+				// set formatted values for tool tips
+				var date_tool_options = { year: 'numeric', month: 'short', day: 'numeric' , hour: '2-digit', minute: '2-digit', second: '2-digit'};
+				for(var i = 0; i<view_data_table.getNumberOfRows(); i++){
+					view_data_table.setFormattedValue(i, 0, hticks[i].toLocaleDateString(undefined, date_tool_options));
+				}
+				
+				// set up date hticks for display (not implemented)
+				var date_axis_options = { year: 'numeric', month: 'short', day: 'numeric'};
+				for(var i =0; i<hticks.length; i++){
+					format = hticks[i].toLocaleDateString(undefined, date_axis_options);
+					hticks[i] = {v:i,f:format};
+				}
+				
+				// convert bck to view for filtering
+				var new_view = new google.visualization.DataView(view_data_table);
+				
+				// filter
+				new_view.setColumns(indexes);
+
+				// find slider end and start indexes from dates (or just set)
+				var s_index = -1;
+				var e_index = -1;
+				if(typeof start == "object"){
+					end_s = end.toLocaleDateString(undefined, date_tool_options);
+					start_s = start.toLocaleDateString(undefined, date_tool_options);
+					
+					
+					for(var i = 0; i<new_view.getNumberOfRows(); i ++){
+						if(end_s == new_view.getFormattedValue(i,0)){
+							e_index = i;
+							break;
+						}	
+						if(start_s == new_view.getFormattedValue(i,0)){
+							s_index = i;
+						}
+					}
+				} else{
+					e_index = end;
+					s_index = start;
+				}
+				
+				// catch slider range errors and reset 
+				if(e_index == s_index){
+					e_index = new_view.getNumberOfRows() - 1;
+					s_index = new_view.getNumberOfRows() - 21;
+				}
+				
+				// change of venue reset sliders
+				if(cv){
+					e_index = new_view.getNumberOfRows() - 1;
+					s_index = new_view.getNumberOfRows() - 21;
+				}
+
+
+				// set new options
+				// REFACTOR: could maybe just change hAxis properties??
+				cw.setOptions(all_options_switch[switch_name]);
+				
+				// REFACTOR: could maybe just change hAxis properties??
+				ds.setOptions(changeViewSliderOptions);
+				
+				ds.setState({range:{'start': s_index, 'end': e_index}});
+				dash.draw(new_view);
+
+				
+				// callback for calc
+				function getDomain(dt, row){
+					// can't format here
+					hticks.push(dt.getValue(row,0));
+					count++;
+					return count;
+				}
+				
+			}
+			
+			// button callback change view
+			function changeView(){
+
+				// loading overlays
+				for(var i = 0; i<line_overlays.length; i++){
+					line_overlays[i].style.display = 'block';
+				}
+				
+				display_view = !display_view;
+				for(var i = 0; i<all_dashboards.length; i++){
+					var view_cols = [0];
+					// find indexes of checked components
+					
+					for (var j = 0; j < all_boxes[i].length; j++) {
+						if(all_boxes[i][j].checked){
+							var comp = all_boxes[i][j].id.substr(2);
+							var col = find_column_index(comp);
+							view_cols.push(col);
+							view_cols.push(col+1); // add its annotation column
+							view_cols.push(col+2); // uncertainty
+						}
+					}
+					update_checkboxes(all_datatables[i], all_sliders[i], all_dashboards[i], all_chart_wrappers[i], view_cols, true);
+				}
+			}
+
+			// CHART OPTION OBJECTS
+			// NOTE (refactoring): variables are assigned a reference to an object (not copied)
+			// 					: Object.assign to clone or merge onjects (not for objects as properties)
+			// module export these after JS tutorial
+			
+			var tableOptions = {
+				allowHtml: true,
+				cssClassNames: { 
+					headerCell: 'tableheader',
+					tableCell: 'tablecell'
+				},
+				//sort: 'disable',
+				sortColumn: 0,
+				sortAscending: false,
+				page: 'enable',
+				pagingButtons: 'both',
+				//startPage: 2,
+			};
+
+			var tableScaleOptions = {
+				allowHtml: true,
+				cssClassNames: { 
+					tableCell: 'tableScalecell'
+				}
+			};
+
+
+			// options object passed to chart wrapper
+			var chartOptionsTemplate = {
+				intervals: { style: 'area' , color:'darkgray'},
+				curveType: 'line',
+				explorer: {
+					actions: ['dragToZoom', 'rightClickToReset'],
+					maxZoomIn: 0.05,
+					keepInBounds: true, 
+				},
+				legend: { position: 'right' },
+				lineWidth:1.5,
+				//backgroundColor: '#e6f2ff',
+				//backgroundColor: {stroke: '#008080', strokeWidth :'2'},
+				height:366,
+				chartArea: {
+					height: '90%',
+					width: '66%',
+					left: '10%'
+					
+				},
+				vAxis: {
+					viewWindowMode:'explicit',
+					textStyle :{
+						bold:true, 
+						fontSize: 10
+						},
+                    titleTextStyle :{
+						bold:true, 
+						fontSize: 15
+						}
+				},
+				hAxis: {
+					gridlines: {color: 'none'},
+					format: 'MMM dd, yy',
+					textStyle :{
+						bold:true, 
+						fontSize: 10
+						}
+				},
+				annotations: {
+					boxStyle: {
+					// Color of the box outline.
+					stroke: '#888',
+					// Thickness of the box outline.
+					strokeWidth: 1,
+					// x-radius of the corner curvature.
+					rx: 10,
+					// y-radius of the corner curvature.
+					ry: 10,
+					// Attributes for linear gradient fill.
+					gradient: {
+							// Start color for gradient.
+							color1: '#fbf6a7',
+							// Finish color for gradient.
+							color2: '#33b679',
+							// Where on the boundary to start and
+							// end the color1/color2 gradient,
+							// relative to the upper left corner
+							// of the boundary.
+							x1: '0%', y1: '0%',
+							x2: '100%', y2: '100%',
+							// If true, the boundary for x1,
+							// y1, x2, and y2 is the box. If
+							// false, it's the entire chart.
+							useObjectBoundingBoxUnits: true
+						}
+					}
+  					}
+
+				//colors: line_colours
+			}
+				
+			// options for control (DEV:parameterize constants between chart and control)
+			var datepickerOptions = {
+				filterColumnIndex: 0,
+				ui : {
+					snapToData: true,
+					chartOptions : {
+						intervals: { style: 'area' , color:'black'},
+						height:66,
+						lineWidth:1.0,
+						chartArea : {
+							width: '66%',
+							left: '10%'
+						},
+						vAxis: {
+							viewWindowMode:'explicit',
+							viewWindow: {
+							min:-10
+							}
+						},
+						hAxis: {
+							gridlines: {color: 'none'},
+							format: 'MMM dd, yy',
+							textStyle :{
+								bold:true, 
+								fontSize: 10
+								}
+						}
+						
+					}
+				}
+			}
+
+			var candleOptionsTemplate = {
+					legend : {position:'top'},
+					//466
+					height:466,
+					hAxis: {
+						textStyle :{
+						bold:true, 
+						fontSize: 10
+						}
+					},
+					vAxis: {
+						textStyle :{
+						bold:true, 
+						fontSize: 10
+						},
+                        titleTextStyle :{
+						bold:true, 
+						fontSize: 15
+						}
+						
+					},
+					chartArea: {
+						height: '75%',
+						width: '80%'
+						
+					},
+					intervals: { style: 'boxes' , color:'black', boxWidth:1},
+					//pointSize : 5,
+					series: {
+						0: { pointShape: { 
+								type: 'star',
+								sides: 2, 
+								rotation: 90
+							},
+							pointSize : 25,
+							dataOpacity: 0.8,
+							//dent: 0.0005
+
+						},
+                        1: {
+                            pointShape : { size: 7, type: 'diamond', color: 'red' } // legend symbol (format at cell level overides markers)
+                        }
+					},
+					colors: ['#795548'],
+					explorer: {
+						actions: ['dragToZoom', 'rightClickToReset'],
+						maxZoomIn: 0.05,
+						keepInBounds: true, 
+					},
+					//seriesType: 'candlesticks',
+					//series: {1: {type: 'line' ,color:'black', visibleInLegend: true}, 0 :{visibleInLegend: false}}
+
+				}
+                
+                var changeViewSliderOptions = {
+					filterColumnIndex: 0,
+					ui : {
+						snapToData: true,
+						chartOptions : {
+							intervals: { style: 'area' , color:'black'},
+							height:66,
+							lineWidth:1.0,
+							chartArea : {
+								width: '66%',
+								left: '10%'
+							},
+							vAxis: {
+								viewWindowMode:'explicit',
+								viewWindow: {
+								min:-10
+								}
+							},
+							hAxis: {
+								gridlines: {color: 'none'},
+								textStyle :{
+									bold:true, 
+									fontSize: 10
+								},
+								textPosition: 'none',
+								//ticks: hticks,
+								showTextEvery:'automatic'
+						}
+							
+							
+						}
+					}
+				}
+                
+                var changeViewOptionsTemplate = {
+					intervals: { style: 'area' , color:'darkgray'},
+					curveType: 'line',
+					explorer: {
+						actions: ['dragToZoom', 'rightClickToReset'],
+						maxZoomIn: 0.05,
+						keepInBounds: true
+					},
+					legend: { position: 'right' },
+					lineWidth:1.5,
+					//backgroundColor: '#e6f2ff',
+					//backgroundColor: {stroke: '#008080', strokeWidth :'2'},
+					height:366,
+					chartArea: {
+						height: '90%',
+						width: '66%',
+						left: '10%'
+						
+					},
+					hAxis: {
+					gridlines: {color: 'none'},
+					textStyle :{
+						bold:true, 
+						fontSize: 10
+						},
+					textPosition: 'none',
+					//ticks: hticks,
+					showTextEvery:'automatic'
+					
+					},
+					vAxis: {
+						viewWindowMode:'explicit',
+						textStyle :{
+							bold:true, 
+							fontSize: 10
+							},
+                        titleTextStyle :{
+						bold:true, 
+						fontSize: 15
+						}
+					},
+					annotations: {
+						boxStyle: {
+						// Color of the box outline.
+						stroke: '#888',
+						// Thickness of the box outline.
+						strokeWidth: 1,
+						// x-radius of the corner curvature.
+						rx: 10,
+						// y-radius of the corner curvature.
+						ry: 10,
+						// Attributes for linear gradient fill.
+						gradient: {
+								// Start color for gradient.
+								color1: '#fbf6a7',
+								// Finish color for gradient.
+								color2: '#33b679',
+								// Where on the boundary to start and
+								// end the color1/color2 gradient,
+								// relative to the upper left corner
+								// of the boundary.
+								x1: '0%', y1: '0%',
+								x2: '100%', y2: '100%',
+								// If true, the boundary for x1,
+								// y1, x2, and y2 is the box. If
+								// false, it's the entire chart.
+								useObjectBoundingBoxUnits: true
+							}
+						}
+                        
+						}
+
+					//colors: line_colours
+				}
+  </script>
+</head>

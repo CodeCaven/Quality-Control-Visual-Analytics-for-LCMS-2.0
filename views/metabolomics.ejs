@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<% include ./partials/metab_head %>
+<body onresize="reSize()">
+
+<% include ./partials/sidebar %>
+
+<!-- !PAGE CONTENT! -->
+<div class="w3-main" style="margin-left: 20em; margin-top:2.3em;" id="main">
+
+  <!-- Chart Container -->
+  <div class="w3-center w3-container" style="padding-right:0em;" id="<%=v_metrics[0]%>">
+
+  <!---->
+
+  
+    <h1 class="w3-xlarge w3-text-black w3-center heading metric-heading w3-light-gray"><b><%=v_metrics[0]%></b></h1>
+    <!--Custom Colours Positive-->
+    <div class="w3-panel checkPanel Positive" style="display:none; margin-bottom:0em;" >
+      <% for(var i=0; i < v_pos_names.length; i++) { %>
+        <% if(i == 4) { %>
+        </br> 
+        <%}%>
+        <!--<input class="w3-check" name="components_<%=v_metrics[0]%>" type="checkbox" id="P_<%=v_pos_names[i]%>">-->
+        <!--<label class="w3-small" for="P_<%=v_pos_names[i]%>"><%=v_pos_names[i].replace("_", " ")%></label>-->
+        <label class="container w3-large" for="P_<%=v_metrics[0]%>_<%=v_pos_names[i]%>"><%=v_pos_names[i].replace("_"," ")%>
+          <input type="checkbox"  style="visibility:hidden;" name="components_<%=v_metrics[0]%>" id="P_<%=v_metrics[0]%>_<%=v_pos_names[i]%>">
+          <span class="checkmark" style="background-color:<%=v_pos_colours[v_pos_names[i]]%>"></span>
+        </label>
+      <%}%>
+
+    </div>
+
+    <!--Custom Colours Negative-->
+    <div class="w3-panel checkPanel Negative" style="margin-bottom:0em;">
+      <% for(var i=0; i < v_neg_names.length; i++) { %>
+        <% if(i == 6) { %>
+        </br> 
+        <%}%>
+        <!--<input class="w3-check" name="components_<%=v_metrics[0]%>" type="checkbox" id="P_<%=v_neg_names[i]%>">-->
+        <!--<label class="w3-small" for="P_<%=v_neg_names[i]%>"><%=v_neg_names[i].replace("_", " ")%></label>-->
+        <label class="container w3-large" for="N_<%=v_metrics[0]%>_<%=v_neg_names[i]%>"><%=v_neg_names[i].replace("_"," ")%>
+          <input type="checkbox"  style="visibility:visible;" name="components_<%=v_metrics[0]%>" id="N_<%=v_metrics[0]%>_<%=v_neg_names[i]%>">
+          <span class="checkmark" style="background-color:<%=v_neg_colours[v_neg_names[i]]%>"></span>
+        </label>
+      <%}%>
+
+    </div>
+
+    <!--Radio buttons pos and neg and select all and change view-->
+    <a href="#" onclick="changeView()"><strong>Change X-Axis</strong></a>
+    <label>
+        <input class="w3-radio" type="radio" name="<%=v_metrics[0]%>_polarity" value="Positive" onclick="radioUpdate(this)">Positive</label>
+    
+    <label>
+        <input class="w3-radio" type="radio" name="<%=v_metrics[0]%>_polarity" value="Negative" onclick="radioUpdate(this)">Negative</label>
+      <a href="#" onclick="allCharts()"><strong>Select All</strong></a>
+
+    <div id="dash_<%=v_metrics[0]%>" class="chart_parent">
+        
+      <div id="chart_<%=v_metrics[0]%>"></div>
+      <div name="overlayLine" class="overlay" id="overlay_<%=v_metrics[0]%>">
+          <div class="overlay_text">...Loading</div>
+        </div>
+      
+    </br>
+      <div id="datecontrol_<%=v_metrics[0]%>"></div>
+      
+    </div>
+    
+  </br>
+  <!--REFACTOR: 0 index not in loop-->
+    <!--Checkboxes and Button Positive-->
+    
+    
+    
+    <!--Candle Chart-->
+    <div class="chart_parent">
+
+    <div id="candle_<%=v_metrics[0]%>"></div>
+      
+    <div name="overlayCandle" class="overlay" id="overlayCandle_<%=v_metrics[0]%>">
+      <div class="overlay_text">...Loading</div>
+    </div>
+    
+  </div>
+
+  <!--Controller buttons for candle chart-->
+  
+  <button id="l_<%=v_metrics[0]%>" name="arrowButtons" class="w3-button w3-xlarge w3-circle w3-white"><i id="l_icon_<%=v_metrics[0]%>" class="fa fa-arrow-left"></i></button>
+  <span style="background-color:black; color:white; border-radius:0.3em" class="w3-large" id="dateDisplay_<%=v_metrics[0]%>"></span>
+  <button id="r_<%=v_metrics[0]%>" name="arrowButtons" class="w3-button w3-xlarge w3-circle w3-white"><i id="r_icon_<%=v_metrics[0]%>" class="fa fa-arrow-right"></i></button>
+  <button id="rr_<%=v_metrics[0]%>" name="arrowButtons" class="w3-button w3-xlarge w3-circle w3-white"><i id="rr_icon_<%=v_metrics[0]%>" class="fa fa-arrow-right"></i><i id="rr_icon2_<%=v_metrics[0]%>" class="fa fa-arrow-right"></i></button>
+  </div>
+  
+  <!-- Create containers for rest of charts -->
+  <% for(var i=1; i < v_metrics.length; i++) { %>
+	  <div class="w3-center w3-container" style="padding-top: 2.3em; padding-right:0em; margin-top:-2.3em" id="<%=v_metrics[i]%>">
+    
+    <h1 class="w3-xlarge w3-text-black w3-center w3-light-gray metric-heading heading"><b><%=v_metrics[i]%></b></h1>
+    <!--Custom Colours Positive-->
+    <div class="w3-panel checkPanel Positive" style="display:none; margin-bottom:0em;">
+      <% for(var j=0; j < v_pos_names.length; j++) { %>
+        <% if(j == 4) { %>
+        </br> 
+        <%}%>
+        <!--<input class="w3-check" name="components_<%=v_metrics[i]%>" type="checkbox" id="P_<%=v_pos_names[j]%>">-->
+        <!--<label class="w3-small" for="P_<%=v_pos_names[j]%>"><%=v_pos_names[j].replace("_", " ")%></label>-->
+        <label class="container w3-large" for="P_<%=v_metrics[i]%>_<%=v_pos_names[j]%>"><%=v_pos_names[j].replace("_"," ")%>
+          <input type="checkbox"  style="visibility:hidden;" name="components_<%=v_metrics[i]%>" id="P_<%=v_metrics[i]%>_<%=v_pos_names[j]%>">
+          <span class="checkmark" style="background-color:<%=v_pos_colours[v_pos_names[j]]%>"></span>
+        </label>
+      <%}%>
+
+    </div>
+
+    <!--Custom Colours Negative-->
+    <div class="w3-panel checkPanel Negative" style="margin-bottom:0em;">
+      <% for(var j=0; j < v_neg_names.length; j++) { %>
+        <% if(j == 6) { %>
+        </br> 
+        <%}%>
+        <!--<input class="w3-check" name="components_<%=v_metrics[i]%>" type="checkbox" id="P_<%=v_neg_names[j]%>">-->
+        <!--<label class="w3-small" for="P_<%=v_neg_names[j]%>"><%=v_neg_names[j].replace("_", " ")%></label>-->
+        <label class="container w3-large" for="N_<%=v_metrics[i]%>_<%=v_neg_names[j]%>"><%=v_neg_names[j].replace("_"," ")%>
+          <input type="checkbox"  style="visibility:visible;" name="components_<%=v_metrics[i]%>" id="N_<%=v_metrics[i]%>_<%=v_neg_names[j]%>">
+          <span class="checkmark" style="background-color:<%=v_neg_colours[v_neg_names[j]]%>"></span>
+        </label>
+      <%}%>
+
+  
+    </div>
+
+    <!--Radio buttons pos and neg and select all and switch view-->
+    <a href="#<%=v_metrics[i]%>" onclick="changeView()"><strong>Change X-Axis</strong></a>
+    <label>
+        <input class="w3-radio" type="radio" name="<%=v_metrics[i]%>_polarity" value="Positive" onclick="radioUpdate(this)">Positive</label>
+    
+    <label>
+        <input class="w3-radio" type="radio" name="<%=v_metrics[i]%>_polarity" value="Negative" onclick="radioUpdate(this)">Negative</label>
+    <a href="#<%=v_metrics[i]%>" onclick="allCharts()"><strong>Select All</strong></a>
+
+    <div id="dash_<%=v_metrics[i]%>" class="chart_parent">
+
+      <!--Chart with overlay-->
+        <div id="chart_<%=v_metrics[i]%>"></div>
+        <div name="overlayLine" class="overlay" id="overlay_<%=v_metrics[i]%>">
+            <div class="overlay_text">...Loading</div>
+          </div>
+       
+    </br>
+      <div id="datecontrol_<%=v_metrics[i]%>"></div>
+  </div>
+</br>
+  
+    <!--Candle Chart-->
+    <% if(v_metrics[i] != 'Area (normalised)'){%>
+      <% if(v_metrics[i] != 'Height (normalised)'){%>
+    
+        <div class="chart_parent">
+        <div id="candle_<%=v_metrics[i]%>"></div>
+          
+        <div name="overlayCandle" class="overlay" id="overlayCandle_<%=v_metrics[i]%>">
+          <div class="overlay_text">...Loading</div>
+        </div>
+        
+      </div>
+
+      <!--Controller buttons for candle chart-->
+      <button id="l_<%=v_metrics[i]%>" name="arrowButtons" class="w3-button w3-xlarge w3-circle w3-white"><i id="l_icon_<%=v_metrics[i]%>" class="fa fa-arrow-left"></i></button>
+      <span style="background-color:black; color:white; border-radius:0.3em" class="w3-large" id="dateDisplay_<%=v_metrics[i]%>"></span>
+      <button id="r_<%=v_metrics[i]%>" name="arrowButtons" class="w3-button w3-xlarge w3-circle w3-white"><i id="r_icon_<%=v_metrics[i]%>" class="fa fa-arrow-right"></i></button>
+      <button id="rr_<%=v_metrics[i]%>" name="arrowButtons" class="w3-button w3-xlarge w3-circle w3-white"><i id="rr_icon_<%=v_metrics[i]%>" class="fa fa-arrow-right"></i><i id="rr_icon2_<%=v_metrics[i]%>" class="fa fa-arrow-right"></i></button>
+      <%  } %>
+    <%  } %>
+
+    <!--Heat Table Height Positive-->
+    <% if(v_metrics[i] == 'Height (normalised)'){%>
+      
+    
+      <!--Colour Scale-->
+      <div id="table_scale<%=v_metrics[i]%>"></div>
+    </br>
+      <strong>Positive</strong>
+    </br>
+    <div class="chart_parent" style="margin-left:1em">
+      <div id="table_P<%=v_metrics[i]%>"></div>
+      <div name="overlayTable" class="overlay" id="overlayTable_P<%=v_metrics[i]%>">
+        <div class="overlay_text">...Loading</div>
+      </div>
+
+    </div>
+    <!--Heat Table Height Negative-->
+      <h3 class="w3-large"></h3><strong>Negative</strong>
+      <div class="chart_parent" style="margin-left:1em">
+      <div id="table_N<%=v_metrics[i]%>"></div>
+      <div name="overlayTable" class="overlay" id="overlayTable_N<%=v_metrics[i]%>">
+        <div class="overlay_text">...Loading</div>
+      </div>
+    </div>
+    
+    <%  } %>
+
+      <!--Heat Table Area Positive-->
+    <% if(v_metrics[i] == 'Area (normalised)'){%>
+       
+      <!--Colour Scale-->
+      <div id="table_scale<%=v_metrics[i]%>"></div>
+    </br>
+      <strong>Positive</strong>
+    </br>
+    <div class="chart_parent" style="margin-left:1em">
+      <div id="table_P<%=v_metrics[i]%>"></div>
+      <div name="overlayTable" class="overlay" id="overlayTable_P<%=v_metrics[i]%>">
+        <div class="overlay_text">...Loading</div>
+      </div>
+    </div>
+     <!--Heat Table Area Negative-->
+      <h3 class="w3-large"></h3><strong>Negative</strong>
+      <div class="chart_parent" style="margin-left:1em">
+      <div id="table_N<%=v_metrics[i]%>"></div>
+      <div name="overlayTable" class="overlay" id="overlayTable_N<%=v_metrics[i]%>">
+        <div class="overlay_text">...Loading</div>
+      </div>
+    </div>
+    <%  } %>
+	  </div>
+  <%}%>
+  
+
+<!-- End page content -->
+</div>
+
+
+</html>

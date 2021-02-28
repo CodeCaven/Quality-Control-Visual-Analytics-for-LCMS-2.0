@@ -1,0 +1,877 @@
+<head>
+    <title>LC-MS Quality Control</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://kit.fontawesome.com/f77ac44772.js" crossorigin="anonymous"></script> <!--Font Awesome icons-->
+    <script src="./javascripts/DEV-control.js"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.16.0/umd/popper.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <link rel="stylesheet" type="text/css" href="./stylesheets/DEV-style.css"  />
+    <script type="text/javascript">
+
+        // ISSUES 
+        // - small/mid screen display (tablets) (set proper overlays)
+        // - qecmips(Metab) hover on warnings
+        // - nav header on resize
+        // - tooltips below page (metab machine 2)
+        // - change window to icons
+
+        // 2DO
+        // - test tiles number 1 - 30
+        // - tile heights (logic for 1,2 etc)
+
+        /* machines object structure */
+        
+        /*
+        machines (Array #MACHINES) {
+            experiment
+            machine_id
+            machine_name
+            machine_type
+            dates (Array #RUNS)
+            summary (Array #RUNS){
+                metric_name{ // REFACTOR: change to display name
+                    component (Array 1)
+                }
+            }
+            *colours (Array #RUNS)
+            *breaches
+        }
+        */
+
+        /* FUNCTIONS 
+        flip_tiles - animation on load
+        create_machine_arrays - creates arrays for dropdown
+        *create_navbar_dropdown - adds machines to charts dropdown
+        create_grid - creates the grid of tiles
+        append_tile_parts - called after details added to tiles
+        create_tile - adds the details to front and back tiles 
+        *diff_days - returns number of days between a data and current day
+        *getTime - creates the time without seconds 
+        createWindow - creates the window on the tiles as a table
+        create_warnings - creates the warnings on the back of a tile 
+        EVENT hoverCard - change of border on hover 
+        EVENT flipCard - change from front/back tile on click 
+        EVENT tableClick - change date on window click 
+        *EVENT document.onmouseover - handles the tooltips display 
+        *EVENT document.onmouseout - handles tooltip removal 
+        *EVENT document.onclick - handles page reload or change 
+        */
+
+        // get machines from controller set layout variables and globals
+        let machines = <%-JSON.stringify(ejs_machines)%>;
+        const MACHINES_NUMBER = machines.length;
+        const COLS = 5; // 1,2,3, or 4
+        const ROWS = Math.ceil(MACHINES_NUMBER/COLS);
+        let tooltipElem; 
+        let proteomics = [];
+        let metabolomics = [];
+        //let gutter_width = 30 + 2*tile_margin; // 15px padding each side of tile plus 20px margin
+        //let gutter_height = 2*tile_margin; // 20px margin top and bottom
+        //let offset = 155; // nav and toolbars, better to hard code as nav height changes
+        //let tile_height = Math.floor((screen.availHeight - ROWS*gutter_height - offset)/ROWS);
+        
+
+        // convert dates and JSON
+        for(let machine in machines){
+            machines[machine]["dates"]= machines[machine]["dates"].map(convert_date);
+            //console.log(machines[machine]["summaries"]);
+            machines[machine]["summaries"]= machines[machine]["summaries"].map(convert_JSON);
+            
+        }
+
+        // add number of threshold breaches (remove??.. leave for sort)
+        for(let machine in machines){
+            machines[machine]["breaches"] = Object.keys(machines[machine].summaries[0]).length;
+        }
+
+        //  add colours for window
+        for(let machine in machines){
+            var colours = [];
+            for(let i =0; i<machines[machine].dates.length; i++){
+                try{
+                    var breaches = Object.keys(machines[machine].summaries[i]).length;
+                
+                    var opacity = breaches/10;
+                    if(opacity > 1){
+                        opacity = 1;
+                    }
+
+                    if(breaches == 0){
+                        var new_colour = "rgb(40, 167, 69)";
+                    }else{
+                        var new_colour = "rgba(220, 53, 69," + opacity + ")";
+                    }
+                }catch{
+                    // no summary data set to 0
+                   var new_colour = "whitesmoke";
+                }
+                colours.push(new_colour);
+            }
+            machines[machine]["colours"] = colours;
+        }
+
+        // sort by threshold breaches
+        machines.sort((a, b) => (a.breaches < b.breaches) ? 1  : -1 );
+
+        // create arrays for nav dropdown
+        create_machines_arrays();
+        
+        // DOM loaded callback
+		document.addEventListener('DOMContentLoaded', function() {
+
+            // update home tooltip
+            var home = document.getElementById("home");
+            home.setAttribute("data-tooltip", "Click to Re-Load Page");
+            
+            // run set-up functions as promises
+            p1 = create_navbar_dropdown();
+            p2 = create_grid();
+
+            Promise.all([p1,p2]).then(
+                result => flip_tiles()
+            ).catch(
+                error => console.log(error)
+            );
+        }, false);
+
+        // on load, flip the tiles
+        function flip_tiles(){
+            let tiles = document.getElementsByClassName("tile");
+            let tiles_inner = document.getElementsByClassName("tile-inner");
+            let tiles_front = document.getElementsByClassName("tile-front");
+            let tiles_back = document.getElementsByClassName("tile-back");
+            let array = [];
+            let index;
+            let new_index;
+
+            for(let i=0; i<tiles.length; i++){
+                array.push(i);
+            }
+
+            start_animation(0);
+            // animate the rotations
+            function start_animation(j){
+                if(j < array.length){
+                    setTimeout(function(){
+                        // need to use a variable scoped to this function (ie can't use j)
+                        let tile_index = j;
+                        // remove shadow and show
+                        tiles_front[tile_index].style.boxShadow = "0px 0px 0px whitesmoke";
+                        tiles_back[tile_index].style.boxShadow = "0px 0px 0px whitesmoke";
+                        tiles[tile_index].style.opacity = 1;
+
+                        // reset position of icon footer for scroll
+                        if(tiles_back[tile_index].scrollHeight > tiles_back[tile_index].clientHeight){
+                            tiles_back[tile_index].childNodes[1].style.position = "relative";
+                            tiles_back[tile_index].childNodes[1].style.marginTop = "2em";
+                        };
+
+                        // animate
+                        tiles_inner[tile_index].style.animation = "rotation 3s";
+
+                        setTimeout(function(){
+                            // redraw shadow
+                            tiles_front[tile_index].style.boxShadow = "10px 10px 5px var(--gray)";
+                            tiles_back[tile_index].style.boxShadow = "10px 10px 5px var(--gray)";
+
+                            // add events
+                            tiles[tile_index].addEventListener("mouseover", hoverCard);
+                            tiles[tile_index].addEventListener("mouseout", hoverCard);
+                        }, 3000); 
+
+                        j++;
+                        start_animation(j);
+                    }, 100);
+                }
+            }   
+        }
+
+        // add machines to navbar
+        function create_machines_arrays(){
+
+            // create arrays for each experiment
+            for(let machine in machines){
+                let new_exp = machines[machine].experiment.toUpperCase();
+                let size = Object.keys(machines[machine].summaries[0]).length;
+                let new_menu_item = {};
+                new_menu_item[machines[machine].machine_name] = size;
+                if(new_exp == "PROTEOMICS"){ 
+                    proteomics.push(new_menu_item);
+                }
+                else if(new_exp == "METABOLOMICS"){
+                    metabolomics.push(new_menu_item);
+                }
+            }
+
+            // store for charts page
+            sessionStorage.setItem("proteomics-machines", JSON.stringify(proteomics));
+            sessionStorage.setItem("metabolomics-machines", JSON.stringify(metabolomics));
+        }
+
+        // create the grid for tiles
+        function create_grid(){
+            var mac_index = 0; // used as index into machines
+            let grid = document.getElementById("grid");
+
+            // loop to create the grid
+            for(let i=0; i<ROWS; i++){
+                let new_row = document.createElement("div");
+                new_row.className = "row justify-content-center";
+                for(let j=0; j<COLS; j++){
+                    
+                    if(mac_index >= MACHINES_NUMBER){
+                        break;
+                    }
+                    // new bootstrap col as a tile
+                    let new_col = document.createElement("div");
+                    new_col.className = "col-lg-2 tile text-center";
+                    new_col.style.margin = "1.25rem";
+                    new_col.style.fontSize ="1.25rem"; // base font size for tiles
+                    new_col.setAttribute("data-state", "front");
+                    new_col.setAttribute("data-date-index", "0"); // may not need these 2 attr
+                    new_col.setAttribute("data-machine-index", mac_index);
+
+                    // tile inner
+                    let new_inner = document.createElement("div");
+                    new_inner.className = "tile-inner";
+
+                    // tile front
+                    let new_front = document.createElement("div");
+                    new_front.className = "tile-front";
+
+                    // tile back
+                    let new_back = document.createElement("div");
+                    new_back.className = "tile-back";
+
+                    // create tile front and append all parts
+                    Promise.all([create_tile(new_front, new_back, new_col, mac_index)]).then(
+                        result => append_tile_parts(new_front, new_back, new_inner, new_col, new_row)
+                    ).catch(
+                        error => console.log(error)
+                    );
+                    mac_index ++;
+                }
+                // maybe init empty but promise function updates each row with tiles
+                grid.append(new_row);
+            }  
+        }
+
+        // called after tile content added from promise
+        function append_tile_parts(front, back, inner, tile, row){
+            inner.append(front);
+            inner.append(back);
+            tile.append(inner);
+            row.append(tile);
+        }
+
+        // add details to each tile
+        function create_tile(new_front, new_back, new_tile, machine_index){
+
+            /* FRONT TILE */
+
+            // machine name
+            let new_header = document.createElement("p");
+            new_header.style.fontSize = "1em";
+            new_header.style.fontWeight= "bold";
+            new_header.innerHTML = machines[machine_index].machine_name;
+            new_front.append(new_header);
+
+            // experiment
+            let new_experiment = document.createElement("p");
+            new_experiment.style.fontSize = "0.6em";
+            new_experiment.innerHTML = machines[machine_index].experiment.toUpperCase();
+            // add border to metab machines
+            if(machines[machine_index].experiment.toUpperCase() == "METABOLOMICS"){
+                new_experiment.style.backgroundColor = "lightgray";
+                new_experiment.style.color = "var(--dark)"
+                new_experiment.style.border = "0.3em double var(--dark)";
+                new_experiment.style.width = "80%";
+                new_experiment.style.marginRight = "auto";
+                new_experiment.style.marginLeft = "auto";
+            }
+            new_front.append(new_experiment);
+
+            // icon
+            let size = machines[machine_index].breaches; 
+            let new_icon = document.createElement("span");
+            new_icon.style.margin = "0px";
+            new_icon.style.padding = "0px";
+
+            if(size > 0){
+                    new_icon.className = "fas fa-times text-danger trans-o";
+                }
+                else{
+                    new_icon.className = "fas fa-check text-success trans-o";
+            }
+            new_front.append(new_icon);
+
+            // date
+            let new_date = machines[machine_index].dates[0];
+            let new_date_tag = document.createElement("p");
+            new_date_tag.style.fontSize = "0.7em";
+            new_date_tag.style.fontWeight = "bold";
+            new_date_tag.style.cursor = "help";
+            new_date_tag.style.display = "inline-block";
+            new_date_tag.className = "date trans-o";
+            let days_since = diff_days(new_date);
+            // display days since
+            let display_str;
+            if(days_since == 0){
+                display_str = "Today";
+            }
+            else if(days_since == 1){
+                display_str = "Yesterday";
+            }
+            else{
+                display_str = days_since.toString() + " days ago";
+            }
+            new_date_tag.innerHTML = display_str;
+            // tooltips HERE: css 4 tooltips
+            new_date_tag.setAttribute("tabindex","0"); // kb accessibility with tab
+            new_date_tag.setAttribute("data-tooltip", new_date.toDateString() + "<br>" + get_time(new_date));
+            //new_date_tag.setAttribute("title", new_date);
+            new_date_tag.setAttribute("data-trigger","hover touchstart"); // TEST: touch
+
+            // container for icons
+            let new_window_container = document.createElement("div");
+            new_window_container.className = "text-center";
+            
+            // append all
+            new_window_container.append(create_window(machine_index));
+            new_front.append(new_window_container);
+            new_front.append(new_date_tag);
+
+            // time
+            let new_time_tag = document.createElement("p");
+            new_time_tag.style.fontSize = "0.6em";
+            new_time_tag.className = "trans-o";
+            if(days_since < 3){ // only last 2 days
+                new_time_tag.innerHTML = get_time(new_date);
+            }
+            else{
+                // no time displayed > 2 days
+                new_time_tag.innerHTML = "<br>";
+            }
+            new_front.append(new_time_tag);
+
+            // chart button
+            var new_button = document.createElement("button");
+            new_button.className = "btn btn-dark btn-sm";
+            new_button.setAttribute("data-chart-front", "true"); // for chart page
+            new_button.setAttribute("data-tooltip", "Click to View Charts");
+            var dl_icon = document.createElement("span");
+            dl_icon.className = "fas fa-chart-line";
+            dl_icon.style.padding = "0px";
+            new_button.style.marginTop = "0em";
+            new_button.style.marginRight = "0.4em"; // so buttons don't touch on smallscreen
+            new_button.style.letterSpacing = "4px";
+            new_button.innerHTML = "Charts";
+            new_button.append(dl_icon);
+            new_front.append(new_button);
+
+            // container for icons
+            var icon_footer = document.createElement("div");
+            icon_footer.className = "fixed-bottom";
+            icon_footer.style.backfaceVisibility = "hidden";
+            icon_footer.style.zIndex = 0
+            icon_footer.addEventListener("click", flipcard);
+
+            // clone for back
+            var icon_footer_back = icon_footer.cloneNode(true);
+
+            // download report
+            var new_dl_link = document.createElement("a");
+            new_dl_link.setAttribute("role", "button");
+            new_dl_link.setAttribute("href", "#");
+            new_dl_link.style.position = "absolute";
+            new_dl_link.style.right = "0.5em";
+            new_dl_link.style.bottom = "0.2em"; // minor alignment
+            // tooltips HERE: css 4 tooltips
+            new_dl_link.setAttribute("tabindex","0"); // kb accessibility with tab
+            
+            //new_dl_link.setAttribute("title", "Download Report");
+            new_dl_link.setAttribute("data-trigger","hover touchstart"); // TEST: touch
+
+            // download icon
+            var new_dl_icon = document.createElement("span");
+            new_dl_icon.className = "fas fa-download text-dark";
+            new_dl_icon.style.paddingBottom = "0.4em";
+            new_dl_icon.setAttribute("data-tooltip","Download Report");
+            
+            // clone for back
+            var back_dl_icon = new_dl_icon.cloneNode(true);
+            var back_dl_link = new_dl_link.cloneNode(true);
+
+            // append dl icon front
+            new_dl_link.append(new_dl_icon);
+            icon_footer.append(new_dl_link);
+            
+            // flip button
+            var new_flip_button = document.createElement("button");
+            new_flip_button.className = "btn btn-lnk fixed-bottom trans-o";
+            new_flip_button.style.position = "absolute";
+            new_flip_button.style.display = "none";
+            new_flip_button.style.left = "0.5em";
+            new_flip_button.style.bottom = 0;
+            new_flip_button.style.paddingLeft = "0.25em";
+            new_flip_button.setAttribute("type", "button");
+            // tooltips HERE: css 4 tooltips
+            new_flip_button.setAttribute("tabindex","0"); // kb accessibility with tab
+            new_flip_button.setAttribute("data-trigger","hover touchstart"); // TEST: touch
+            
+            // flip icon
+            var new_flip_icon = document.createElement("span");
+            new_flip_icon.className = "fas fa-exchange-alt text-dark";
+            new_flip_icon.setAttribute("data-rotate", "false");
+            new_flip_icon.style.padding = "0px";
+            new_flip_icon.style.margin = "0px";
+            new_flip_icon.setAttribute("data-tooltip","Flip to View Warnings");
+
+            // clone for back
+            var new_back_button = new_flip_button.cloneNode(true);
+
+            // append front
+            new_flip_button.append(new_flip_icon);
+            icon_footer.append(new_flip_button);
+            new_front.append(icon_footer);
+
+            /* BACK TILE */
+            // clone flip for back
+            var back_flip_icon = new_flip_icon.cloneNode(true);
+            
+            new_back_button.style.display = "inline-block";
+
+            new_back.append(create_warnings(machine_index, 0));
+
+            // flip icon and button
+            back_flip_icon.classList.add("fa-flip-horizontal");
+            back_flip_icon.setAttribute("data-tooltip", "Flip to View Summary");
+            new_back_button.append(back_flip_icon);
+            new_back_button.addEventListener("click", flipcard);
+            
+            // append chart icon to link
+            back_dl_link.append(back_dl_icon);
+
+            // append to footer and tile
+            icon_footer_back.append(back_dl_link);
+            icon_footer_back.append(new_back_button);
+            new_back.append(icon_footer_back);
+            new_back.scrollTop = 0;
+
+            if(size > 0){
+                // show for warnings
+                new_flip_button.style.display = "inline-block";
+            }
+        }
+
+        function create_warnings(mach_index, sIndex){
+            // add pressure metrics
+
+            // metric look-up object (NOTE: will need to update with config and threshold updates and pressure)
+            let metrics_obj_metab = {
+                "mass_error_ppm_Neg" :"Mass Error ppm (Negative)",
+                "mass_error_ppm_Pos" :"Mass Error ppm (Positive)",
+                "rt": "Retention Time",
+                "area_normalised": "Area Normalised"
+            }
+
+            // metric look-up object (NOTE: will need to update with config and threshold updates and pressure)
+            let metrics_obj_prot = {
+                "rt": {"display" : "Retention Time", "type" : "MS1"},
+                "area_normalised": {"display": "Area Normalised", "type" : "MS1"},
+                "mass_error_ppm" : {"display" : "Mass Error ppm", "type" : "MS1"},
+                "fwhm": {"display": "Full Width Half Maximum", "type" : "MS1"}, 
+                "tf": {"display": "Tailing Factor", "type" : "MS1"},
+                "af": {"display": "Asymmetry Factor", "type" : "MS1"},
+                "MS/MS Spectra": {"display": "MS/MS Spectra", "type" : "MS2"},
+                "Target PSMs": {"display": "Target PSMs", "type" : "MS2"},
+                "Unique Target Peptides": {"display": "Unique Target Peptides", "type" : "MS2"},
+                "Target Protein Groups": {"display": "Target Protein Groups", "type" : "MS2"},
+                "Precursor Mass Error": {"display": "Precursor Mass Error", "type" : "MS2"}
+            }
+
+            // get summaries and experiment type
+            let summaries = machines[mach_index].summaries[sIndex];
+            let exp = machines[mach_index].experiment;
+            
+            // html to return
+            let new_html = document.createElement("div");
+
+            /*LC-MS title*/
+            let new_metric_title = document.createElement("p");
+            new_metric_title.className = "tile-back-display-header";
+            new_metric_title.innerHTML = "LC-MS <br>Warnings<br>";
+
+            // danger icon
+            let new_danger_icon = document.createElement("span");
+            new_danger_icon.className = "fas fa-exclamation-triangle";
+
+            // clone for ms2 and append
+            let ms2_danger_icon = new_danger_icon.cloneNode(true);
+            new_metric_title.append(new_danger_icon);
+
+            // store for append logic once created
+            let lcms_metrics = [];
+            let ms2_metrics = [];
+            let new_metric_title_ms2;
+            
+            if(exp == "metabolomics"){
+                for(let key in summaries){
+                    // metric
+                    let new_metric_row = document.createElement("p");
+                    new_metric_row.style.cursor = "pointer";
+                    new_metric_row.setAttribute("data-chart-back", metrics_obj_metab[key]);
+                    new_metric_row.setAttribute("data-tooltip", "Click to View Charts");
+                    new_metric_row.className = "tile-back-display";
+                    new_metric_row.innerHTML = metrics_obj_metab[key] + " "; 
+                    // badge
+                    let new_badge = document.createElement("span");
+                    new_badge.className = "badge badge-danger";
+                    new_badge.innerHTML = Object.keys(summaries[key]).length;
+                    new_badge.style.cursor = "help";
+                    new_badge.setAttribute("tabindex","0"); // kb accessibility with tab
+                    new_badge.setAttribute("data-trigger","hover touchstart"); // TEST: touch
+                    // tooltip content (table as string)
+                    let new_table_str = "<table class='tooltipTable'>";
+                    for(let metric in summaries[key]){
+                        var new_row_str = "<tr class='tooltipTable'>";
+                        let new_td_str = "<td class='tooltipTable'>";
+                        new_td_str += "<strong>" + metric + "</strong>" + "</td>";
+                        new_row_str += new_td_str;
+                        
+                        for(let cell in summaries[key][metric]){
+                            let cell_td_str = "<td class='tooltipTable'>";
+                            cell_td_str += summaries[key][metric][cell].toString() + "</td>";
+                            new_row_str += cell_td_str;
+                        }
+                        new_table_str += new_row_str + "</tr>";
+                    }
+                    new_table_str += "</table>";
+                    
+                    new_badge.setAttribute("data-tooltip", new_table_str);
+                    //new_badge.setAttribute("title", new_tip);
+                    new_metric_row.append(new_badge);
+                    lcms_metrics.push(new_metric_row);
+                }
+            }
+            else if(exp = "proteomics"){
+               
+                /*MS2 title*/
+                new_metric_title_ms2 = document.createElement("p");
+                new_metric_title_ms2.className = "tile-back-display-header";
+                new_metric_title_ms2.innerHTML = "MS2 <br>Warnings<br>";
+                // add danger icon
+                new_metric_title_ms2.append(ms2_danger_icon);
+                
+                for(let key in summaries){
+                    let new_metric_name = metrics_obj_prot[key];
+                    if(new_metric_name.type === "MS1"){
+                        // metric
+                        let new_metric_row = document.createElement("p");
+                        new_metric_row.className = "tile-back-display";
+                        new_metric_row.style.cursor = "pointer";
+                        new_metric_row.setAttribute("data-chart-back", new_metric_name.display);
+                        new_metric_row.setAttribute("data-tooltip", "Click to View Charts");
+                        new_metric_row.innerHTML = new_metric_name.display + " "; 
+                        // badge
+                        let new_badge = document.createElement("span");
+                        new_badge.className = "badge badge-danger";
+                        new_badge.innerHTML = Object.keys(summaries[key]).length;
+                        new_badge.style.cursor = "help";
+                        new_badge.setAttribute("tabindex","0"); // kb accessibility with tab
+                        new_badge.setAttribute("data-trigger","hover touchstart"); // TEST: touch
+                        // tooltip content (table as string)
+                        let new_table_str = "<table class='tooltipTable'>";
+                        for(let metric in summaries[key]){
+                            var new_row_str = "<tr class='tooltipTable'>";
+                            let new_td_str = "<td class='tooltipTable'>";
+                            new_td_str += "<strong>" + metric + "</strong>"+ "</td>";
+                            new_row_str += new_td_str;
+                            
+                            for(let cell in summaries[key][metric]){
+                                let cell_td_str = "<td class='tooltipTable'>";
+                                cell_td_str += summaries[key][metric][cell].toString() + "</td>";
+                                new_row_str += cell_td_str;
+                            }
+                            new_table_str += new_row_str + "</tr>";
+                        }
+                        new_table_str += "</table>";
+                        new_badge.setAttribute("data-tooltip",new_table_str);
+                        new_metric_row.append(new_badge);
+                        lcms_metrics.push(new_metric_row);
+                    }
+                    else if(new_metric_name.type === "MS2"){
+                        // metric
+                        let new_metric_row_ms2 = document.createElement("p");
+                        new_metric_row_ms2.className = "tile-back-display";
+                        new_metric_row_ms2.style.cursor = "pointer";
+                        new_metric_row_ms2.setAttribute("data-chart-back", new_metric_name.display);
+                        new_metric_row_ms2.setAttribute("data-tooltip", "Click to View Charts");
+                        new_metric_row_ms2.innerHTML = new_metric_name.display + "<br>"; 
+                        // badge
+                        let new_badge_ms2 = document.createElement("span");
+                        new_badge_ms2.className = "badge badge-danger";
+                        // add badge content
+                        for(let metric in summaries[key]){
+                            try{
+                                new_badge_ms2.innerHTML = summaries[key][metric][0].toString() + "<br>" +
+                                                        summaries[key][metric][1].toString();
+                            }
+                            catch(err){ // catch index error on precursor ppm (as array size 1)
+                                new_badge_ms2.innerHTML = summaries[key][metric][0].toString();
+                            }
+                        }
+                        new_metric_row_ms2.append(new_badge_ms2);
+                        ms2_metrics.push(new_metric_row_ms2);
+                    }
+                }
+            } 
+            // append lcms metrics and title (only if breaches)
+            if(lcms_metrics.length > 0){
+                    new_html.append(new_metric_title);
+                    for(let lcms in lcms_metrics){
+                        new_html.append(lcms_metrics[lcms]);
+                    }
+                }
+            // append ms2 metrics and title (only if breaches)
+            if(ms2_metrics.length > 0){
+                new_html.append(new_metric_title_ms2);
+                for(let ms2 in ms2_metrics){
+                    new_html.append(ms2_metrics[ms2]);
+                }
+            }
+            return new_html;
+        }
+
+        // callback to rotate card
+        function flipcard(el){
+
+            // only if click from rotate icon
+            if(!el.target.hasAttribute("data-rotate")){
+                return;
+            }
+
+            let button = el.target.parentElement;
+            let tile_inner = el.target.parentElement.parentElement.parentElement.parentElement;
+            let tile_back = tile_inner.childNodes[1];
+            let tile_front = tile_inner.childNodes[0];
+            let tile = tile_inner.parentElement;
+            let back_footer = tile_back.childNodes[1];
+            let state = tile.getAttribute("data-state");
+
+            // reset position of icon footer for scroll
+            if(tile_back.scrollHeight > tile_back.clientHeight){
+                back_footer.style.position = "relative";
+                back_footer.style.marginTop = "2em";
+            };
+           
+            // remove shadow
+            tile_front.style.boxShadow = "0px 0px 0px whitesmoke";
+            tile_back.style.boxShadow = "0px 0px 0px whitesmoke";
+
+            // leave duplicate code in "if" 
+            if (state == "front"){
+                // scroll back to top
+                tile_back.scrollTop = 0;
+                // rotate
+                tile_inner.style.transform = "rotateY(180deg)";
+                setTimeout(function(){
+                    // redraw shadows
+                    tile_front.style.boxShadow = "10px 10px 5px grey";
+                    tile_back.style.boxShadow = "10px 10px 5px grey";
+                    // reset button and tile state
+                    tile.setAttribute("data-state", "back");
+                    
+                }, 500);
+            }
+            else if (state == "back"){
+                // rotate
+                tile_inner.style.transform = "rotateY(360deg)";
+                // redraw shadow (leave in 'if' as clicks sometimes catch the row not the tile)
+                setTimeout(function(){
+                    // redraw shadows
+                    tile_front.style.boxShadow = "10px 10px 5px grey";
+                    tile_back.style.boxShadow = "10px 10px 5px grey";
+                    // reset button
+                    tile.setAttribute("data-state", "front");
+                }, 500);
+            }
+            
+        }
+
+        function hoverCard(el){
+            var eventType = el.type;
+            var tile_inner = el.currentTarget.childNodes[0];
+            var tile_front = tile_inner.childNodes[0];
+            var tile_back = tile_inner.childNodes[1];
+            var tile = el.currentTarget;
+            var state = tile.getAttribute("data-state");
+            var exp = tile_front.childNodes[1].innerHTML;
+            
+            if(eventType == "mouseover"){
+                if(tile_front.classList.contains("tile-danger")){
+                    tile_front.style.border = "0.3em solid var(--danger)";
+                    tile_back.style.border = "0.3em solid var(--danger)";
+                }
+                else if(tile_front.classList.contains("tile-success")){
+                    tile_front.style.border = "0.3em solid var(--success)";
+                    tile_back.style.border = "0.3em solid var(--success)";
+                }
+            }
+            else if(eventType == "mouseout"){
+                    tile_front.style.border = "0.3em double var(--dark)";
+                    tile_back.style.border = "0.3em double var(--dark)";
+            }
+        }
+
+        function create_window(machine){
+            // colours for cells
+            var colours = machines[machine]["colours"];
+            
+            // table
+            var table = document.createElement("span");
+            table.className = "table";
+            table.style.padding = "0px";
+            
+            var trow = document.createElement("trow");
+            
+            // table cells
+            var cellNumber = colours.length;
+            for(let i=0; i < cellNumber; i++){
+                var td = document.createElement("td");
+                td.style.backgroundColor = colours[i];
+                td.style.padding = "0.4em"; // size of cells
+                
+                if(i == 0){
+                    td.className = "highlight";
+                }
+                else{
+                    td.className = "cell";
+                }
+                td.setAttribute("data-cell-index", i);
+                trow.append(td);
+            }
+            table.append(trow);
+            table.setAttribute("data-table-index", "0");
+            table.style.cursor = "pointer";
+            table.addEventListener("click", tableClick);
+            return table;
+        }
+
+        function tableClick(event){
+            let target = event.target;
+
+            // only cell clicks
+            if (target.tagName != 'TD'){
+                return; 
+            }
+
+            // get elements
+            let tile_front = target.parentElement.parentElement.parentElement.parentElement;
+            let tile = tile_front.parentElement.parentElement;
+            var tile_inner = tile.childNodes[0];
+            var tile_back = tile_inner.childNodes[1];
+            var date_tag = tile_front.childNodes[4];
+            var time_tag = tile_front.childNodes[5];
+            let table = target.parentElement.parentElement;
+            let current_index = parseInt(table.getAttribute("data-table-index"));
+            let new_index = target.getAttribute("data-cell-index");
+            var machine_index = tile.getAttribute("data-machine-index");
+            var flip_icon = tile_front.childNodes[7].childNodes[1];
+            var back_footer = tile_back.childNodes[1];
+
+            // breaches
+            try{
+                var breaches = Object.keys(machines[machine_index].summaries[new_index]).length;
+            }
+            catch{
+                // catch null summaries
+                var breaches = 0;
+            }
+
+            // remove current highlight
+            table.childNodes[0].childNodes[current_index].classList.remove('highlight');
+            
+            // add new highlight
+            target.classList.add('highlight');
+
+            // update date
+            var new_date = machines[machine_index].dates[new_index];
+            var days_since = diff_days(new_date);
+            // display days since
+            var display_str;
+            if(days_since == 0){
+                display_str = "Today";
+            }
+            else if(days_since == 1){
+                display_str = "Yesterday";
+            }
+            else{
+                display_str = days_since.toString() + " days ago";
+            }
+
+            // update time
+            var new_time;
+            if(days_since < 3){ // only last 2 days
+                new_time = get_time(new_date);
+            }
+            else{
+                // no time displayed > 2 days
+                new_time = "<br>";
+            }
+
+            // update back tile
+
+            // flip icon
+            if(breaches > 0 && flip_icon.style.display == "none"){
+                flip_icon.style.opacity = 0;
+            }
+            
+            if(breaches > 0){
+                flip_icon.style.display = "inline-block";
+            }
+            else if(breaches == 0){
+                flip_icon.style.opacity = 0;    
+            }
+
+            // transition the changes
+            date_tag.style.opacity = 0;
+            time_tag.style.opacity = 0;
+
+            // wait for transition 0.5s
+            setTimeout(function(){
+                // set changes
+                date_tag.innerHTML = display_str;
+                date_tag.setAttribute("data-tooltip", new_date.toDateString() + "<br>" + get_time(new_date));
+                time_tag.innerHTML = new_time;
+            
+                // show
+                date_tag.style.opacity = 1;
+                time_tag.style.opacity = 1;
+                flip_icon.style.opacity = 1;
+
+                // remove flip icon
+                if(breaches == 0){
+                    flip_icon.style.display = "none";
+                }
+
+                // back tile warnings
+                if(breaches > 0){
+                    tile_back.childNodes[0].remove();
+                    tile_back.append(create_warnings(machine_index, new_index))
+                    tile_back.append(back_footer);
+                }
+                
+            }, 500);
+
+            // set new index
+            table.setAttribute("data-table-index", new_index);
+        }
+
+        
+
+    </script>
+</head>

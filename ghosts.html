@@ -1,0 +1,445 @@
+.navbar {
+    margin-bottom: 0;
+    z-index: 9999;
+    border: 0;
+    font-size: 14px !important;
+    line-height: 1.42857143 !important;
+    letter-spacing: 4px;
+    border-radius: 0;
+  }
+  
+  .nav-item.active {
+  background-color: #9E9E9E
+}
+
+.nav-item:hover {
+  background-color: #9E9E9E
+}
+
+<div class="dropdown-menu" aria-labelledby="navbarDropdown"> 
+          <a class="dropdown-item" href="#">Action1</a> 
+          <a class="dropdown-item" href="#">Action2</a> 
+          <a class="dropdown-item" href="#">Action3</a> 
+          <a class="dropdown-item" href="#">Action4</a> 
+        </div> 
+		
+		
+<button class="navbar-toggler mr-3" type="button" data-toggle="collapse" data-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation"> 
+          <span class="navbar-toggler-icon"></span> 
+        </button>
+		
+<div class="collapse navbar-collapse" id="navbarNav"></div>
+
+<li class="nav-item"> <a class="nav-link" href="#" id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                <span class="fas fa-angle-down"></span> Instruments</a> 
+                <div class="dropdown-menu ml-auto" aria-labelledby="navbarDropdown" id="navbar-machines"> 
+                   
+                </div> 
+              </li>
+			  
+			  
+			  
+.date{
+  text-shadow: 1px 1px grey;
+  text-decoration: underline;
+  text-decoration-style: solid;
+}
+
+
+
+/* flip back button */
+                new_button = document.createElement("button");
+                new_button.className = "btn btn-lnk btn-sm fixed-bottom";
+                new_button.style.marginBottom = "0.5em";
+                new_button.style.letterSpacing = "1px";
+                new_button.style.color = "black";
+                new_button.style.marginLeft = "auto";
+                new_button.style.marginRight = "auto";
+                new_button.setAttribute("type", "button");
+                new_button.addEventListener("click", flipcard);
+
+                // flip icon
+                new_flip_icon = document.createElement("span");
+                new_flip_icon.className = "fas fa-sync-alt text-dark";
+                new_flip_icon.innerHTML = "";
+                new_button.append(new_flip_icon);
+
+                new_back.append(new_button);
+				
+				
+				
+new_chart_link.style.display = "block";
+            new_chart_link.style.position = "absolute";
+            new_chart_link.style.zIndex = 0; // bootstrap adds a z-index to fixed-bottom class
+            new_chart_link.style.backfaceVisibility = "hidden"; // will still be clickable on chrome otherwise
+			
+			
+function create_random_array(){
+                // sequential array
+                for(let i=0; i<tiles.length; i++){
+                    array.push(i);
+                }
+
+                // create a random array of integers upto length
+                while(array.length > 0){
+                    index = Math.floor(Math.random() * (array.length));
+                    new_index = array.splice(index, 1);
+                    random_array.push(new_index[0]);
+                }
+            }
+
+            pl = create_random_array();
+
+            // promise after rand array
+            Promise.all([p1]).then(
+                result => start_animation(random_array.length-1)
+            ).catch(
+                error => console.log(error)
+            );
+			
+			
+// manage hover borders jQuery and classes
+        /*bootstrap success #5cb85c danger #d9534f;*/ 
+        $(document).ready(function(){
+            $(".tile-success").hover(function(){
+                $(this).css("border", "5px solid #5cb85c");
+                }, function(){
+                $(this).css("border", "0.1em solid var(--gray)");
+            });
+
+            $(".tile-danger").hover(
+                function(){
+                    $(this).css("border", "5px solid #d9534f");
+                }, 
+                function(){
+                    $(this).css("border", "0.1em solid var(--gray)");
+                }
+                );
+        });
+		
+// icons to change date
+            let left_icon = document.createElement("span");
+            left_icon.className = "fas fa-arrow-circle-left trans-o";
+            left_icon.style.verticalAlign = "bottom";
+            left_icon.style.padding = "0em"; 
+            left_icon.style.cursor = "pointer";
+            left_icon.style.display = "none";
+            left_icon.setAttribute("data-date", "left");
+            let right_icon = document.createElement("span");
+            right_icon.className = "fas fa-arrow-circle-right trans-o";
+            right_icon.style.verticalAlign = "bottom";
+            right_icon.style.padding = "0em"; 
+            right_icon.style.cursor = "pointer";
+            right_icon.style.display = "none";
+            right_icon.setAttribute("data-date", "right");
+            
+
+            // 
+            //let middle_icon = document.createElement("span");
+            //middle_icon.className = "far fa-calendar-alt";
+            //middle_icon.style.verticalAlign = "bottom";
+            //middle_icon.style.padding = "0em"; 
+            //middle_icon.style.marginRight = "0.5em"; 
+			
+			
+/*
+        code to get and set a pseudo element
+        http://mcgivery.com/htmlelement-pseudostyle-settingmodifying-before-and-after-in-javascript/
+        */
+        var UID = {
+            _current: 0,
+            getNew: function(){
+                this._current++;
+                return this._current;
+            }
+        };
+
+        HTMLElement.prototype.pseudoStyle = function(element,prop,value){
+            var _this = this;
+            var _sheetId = "pseudoStyles";
+            var _head = document.head || document.getElementsByTagName('head')[0];
+            var _sheet = document.getElementById(_sheetId) || document.createElement('style');
+            _sheet.id = _sheetId;
+            var className = "pseudoStyle" + UID.getNew();
+            
+            _this.className +=  " "+className; 
+            
+            _sheet.innerHTML += " ."+className+":"+element+"{"+prop+":"+value+"}";
+            _head.appendChild(_sheet);
+            return this;
+        };
+		
+/* cant transition backgrounds so need pseudo element and opacity*/
+.tile-front::before {
+  position: absolute;
+  content: "";
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: -1;
+  transition: opacity 0.5s ease-in-out;
+  opacity: 0;
+}
+
+
+function changeDate(el){
+
+            // only if click from date icons
+            if(!el.target.hasAttribute("data-date")){
+                return;
+            }
+
+            var tile = el.currentTarget;
+            var tile_inner = tile.childNodes[0];
+            var tile_front = tile_inner.childNodes[0];
+            var tile_back = tile_inner.childNodes[1];
+            var date_tag = tile_front.childNodes[4];
+            var time_tag = tile_front.childNodes[5];
+            var tile_icon = tile_front.childNodes[2];
+            var direct = el.target.getAttribute("data-date");
+            var date_index = tile.getAttribute("data-date-index");
+            var machine_index = tile.getAttribute("data-machine-index");
+            var left_date_icon = tile_front.childNodes[3].childNodes[0];
+            var right_date_icon = tile_front.childNodes[3].childNodes[2];
+            var flip_icon = tile_front.childNodes[7].childNodes[1];
+            var back_footer = tile_back.childNodes[1];
+            
+            // new date index
+            var new_date_index;
+            if(direct == "left"){
+                new_date_index = parseInt(date_index) + 1;
+            }else if(direct == "right"){
+                new_date_index = parseInt(date_index) - 1;
+            }
+
+            // cycle through null summaries (TEST) make sure db has no null summaries
+            while(machines[machine_index].summaries[new_date_index] == null &&
+                     new_date_index > 0 && new_date_index < machines[machine_index].dates.length){
+                if(direct == "left"){
+                    new_date_index += 1;
+                }else if(direct == "right"){
+                    new_date_index -= 1;
+                }
+            }
+
+            // if new_date_index equals dates.length here, no more dates
+            if(new_date_index == machines[machine_index].dates.length){
+                // display something ??
+                return;
+            }
+
+            // change date
+            var new_date = machines[machine_index].dates[new_date_index];
+            var days_since = diff_days(new_date);
+            // display days since
+            var display_str;
+            if(days_since == 0){
+                display_str = "Today";
+            }
+            else if(days_since == 1){
+                display_str = "Yesterday";
+            }
+            else{
+                display_str = days_since.toString() + " days ago";
+            }
+
+            // update time
+            var new_time;
+            if(days_since < 3){ // only last 2 days
+                new_time = get_time(new_date);
+            }
+            else{
+                // no time displayed > 2 days
+                new_time = "<br>";
+            }
+            
+            // breaches for icon and background color
+            var breaches = Object.keys(machines[machine_index].summaries[new_date_index]).length;
+            console.log("Breaches " + breaches);
+
+            // opacity for background colour
+            let opacity = breaches/10;
+            if(opacity > 1){
+                opacity = 1;
+            }
+
+            //new_front.style.background = "radial-gradient(rgba(217, 83, 79, 0.0), rgba(217, 83, 79," + opacity + "))"; 
+        
+            // update icon, background and tile class
+            var icon_update = false;
+            var icon_new_class;
+            if(breaches == 0){
+                if(!tile_icon.classList.contains("text-success")){
+                    icon_new_class = "fas fa-check text-success";
+                    icon_update = true;
+                }
+
+                if(!tile_front.classList.contains("tile-success")){
+                    if(tile_front.classList.contains("tile-danger")){
+                        tile_front.classList.remove("tile-danger");
+                    }
+                    tile_front.classList.add("tile-success");
+                }
+                // change background colour
+                tile_front.pseudoStyle("before", "background", "radial-gradient(rgba(92, 184, 92, 0.0), rgba(27, 99, 207, 0.3))");
+                //tile_front.style.backgroundColor = "transparent";
+                // add/remove trans-border class
+                tile_front.classList.add("trans-border");
+                tile_front.style.border = "0.3em solid var(--success)";
+                tile_back.style.border = "0.3em solid var(--success)";
+            }
+            else{
+                if(!tile_icon.classList.contains("text-danger")){
+                    icon_new_class = "fas fa-times text-danger";
+                    icon_update = true;
+                }
+
+                if(!tile_front.classList.contains("tile-danger")){
+                    if(tile_front.classList.contains("tile-success")){
+                        tile_front.classList.remove("tile-success");
+                    }
+                    tile_front.classList.add("tile-danger");
+                }
+                // change background colour
+                tile_front.pseudoStyle("before", "background", "radial-gradient(rgba(217, 83, 79, 0.0), rgba(217, 83, 79," + opacity + "))");
+                //tile_front.style.backgroundColor = "transparent"; 
+                tile_front.classList.add("trans-border");
+                tile_front.style.border = "0.3em solid var(--danger)";
+                tile_front.style.border = "0.3em solid var(--danger)";    
+            }
+            
+            // background color (debug)
+            // reset date index (debug left icon hide)
+            // icon back double icon (debug)
+            
+            // transition the changes
+            date_tag.style.opacity = 0;
+            time_tag.style.opacity = 0;
+            tile_front.pseudoStyle("before", "opacity", 1);
+            if(icon_update){
+                tile_icon.style.opacity = 0;
+            }
+
+            // left right icons 
+            if(new_date_index == 0){
+                right_date_icon.style.opacity = 0;
+                right_date_icon.style.display = "none";
+            } else if(new_date_index >= machines[machine_index] - 1){
+                left_date_icon.style.opacity = 0;
+                left_date_icon.style.display = "none";
+            }
+            else{
+                if(left_date_icon.style.display == "none"){
+                    left_date_icon.style.opacity = 1;
+                    left_date_icon.style.display = "inline-block";
+                }
+                else if(right_date_icon.style.display == "none"){
+                    right_date_icon.style.opacity = 1;
+                    right_date_icon.style.display = "inline-block";
+                }
+            }
+
+            // flip icon
+            if(breaches > 0 && flip_icon.style.display == "none"){
+                flip_icon.style.opacity = 0;
+            }
+            
+            if(breaches > 0){
+                flip_icon.style.display = "inline-block";
+            }
+            else if(breaches == 0){
+                flip_icon.style.display = "none";
+            }
+
+            // wait for transition 0.5s
+            setTimeout(function(){
+                // set changes
+                date_tag.innerHTML = display_str;
+                date_tag.setAttribute("title", new_date);
+                time_tag.innerHTML = new_time;
+                if(icon_update){
+                    tile_icon.className = icon_new_class;
+                }
+                // show
+                date_tag.style.opacity = 1;
+                time_tag.style.opacity = 1;
+                left_date_icon.style.opacity = 1;
+                right_date_icon.style.opacity = 1;
+                flip_icon.style.opacity = 1;
+                if(icon_update){
+                    tile_icon.style.opacity = 1;
+                }
+                tile_front.classList.remove("trans-border");
+
+                // back tile warnings
+                tile_back.childNodes[0].remove()
+                tile_back.append(create_warnings(machine_index, new_date_index))
+                tile_back.append(back_footer);
+
+                // reset date index
+                tile.setAttribute("data-date-index", new_date_index);
+                
+            }, 500);
+            
+        }
+		
+		
+// create checkbox and label
+                var new_check = document.createElement("div");
+                new_check.className = "custom-control custom-checkbox";
+                var new_input = document.createElement("input");
+                new_input.className = "custom-control-input";
+                new_input.setAttribute("type", "checkbox");
+                new_input.setAttribute("value", ""); // ?? needed
+                new_input.id = "p" + i;
+                var new_label = document.createElement("label");
+                new_label.className = "custom-control-label";
+                new_label.style.fontSize = "0.6em";
+                new_label.style.letterSpacing = "3px";
+                new_label.style.fontWeight = "bold";
+                new_label.setAttribute("for", "p" + i);
+                new_label.innerHTML = positive[i].replace("_", " ");
+				
+				
+* checkboxes */
+.custom-checkbox .custom-control-input~.custom-control-label::before {
+  background-color: #caca4c;
+}
+.custom-control-input:checked~.custom-control-label::before {
+  color: #fff;
+}
+
+/* alignment with labels */
+.custom-control{
+  padding-left: 2rem;
+  padding-top: 0.3rem;
+}
+
+.custom-control-label::before{
+  top: 0rem;
+}
+
+.custom-control-label::after{
+  top: 0.1rem;
+}
+
+
+// create checkbox and label
+                var new_check = document.createElement("div");
+                new_check.className = "custom-control custom-checkbox";
+                var new_input = document.createElement("input");
+                new_input.className = "custom-control-input";
+                new_input.setAttribute("type", "checkbox");
+                new_input.setAttribute("value", ""); // ?? needed
+                new_input.id = "n" + i;
+                var new_label = document.createElement("label");
+                new_label.className = "custom-control-label";
+                new_label.style.fontSize = "0.6em";
+                new_label.style.letterSpacing = "3px";
+                new_label.style.fontWeight = "bold";
+                new_label.setAttribute("for", "n" + i);
+                new_label.innerHTML = negative[i].replace("_"," ");
+				
+if (!idleTimeout) 
+                        return idleTimeout = setTimeout(idled, 350); // This allows to wait a little bit

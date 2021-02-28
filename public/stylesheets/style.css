@@ -1,0 +1,179 @@
+body {
+	font-size:16px;
+	padding-bottom: 9.7em;
+}
+
+hr{
+	margin: 0.7em;
+}
+
+.metric-heading{
+	width:100% !important;
+	border-bottom: 0.1em solid black !important;
+	border-top: 0.1em solid black !important;
+}
+
+
+.header {
+	position: relative;
+    display: flex;
+	justify-content: space-between;
+}
+
+.headerBorder {
+	border-bottom: 0.2em solid black !important;
+	border-left: 0.2em solid black !important;
+	border-right: 0.2em solid black !important;
+
+}
+
+.panelBorder {
+	border-bottom: 0.1em solid black !important;
+	border-top: 0.1em solid black !important;
+}
+
+.topmenu {
+	position: relative;
+	z-index: 5;
+}
+
+.tableheader {
+	font-size: 0.7em;
+	width: 100px;
+	font-family: 'Helvetica', 'Arial';
+}
+
+.tablecell {
+	font-size: 0.7em;
+	width: 30px;
+	text-align: center;
+	font-family: 'Helvetica', 'Arial';
+	font-weight: bold;
+}
+
+.overlay_text{
+    position: absolute;
+    top: 40%;
+    left: 45%;
+    font-size: 20px;
+    color: black;
+    transform: translate(-40%,-45%);
+    -ms-transform: translate(-40%,-45%);
+}
+
+
+.overlay {
+    position: absolute;
+	display: block;
+	width:100%;
+	height:100%;
+	top:0;
+	bottom:0;
+	left:0;
+	right:0;
+	background-color: rgba(0,0,0,0.5);
+    z-index: 2;
+}
+
+.chart_parent {
+	position: relative;
+}
+
+.tooltip {
+	position: relative;
+	display: inline-block;
+}
+  
+.tooltip .tooltiptext {
+visibility: hidden;
+width: 120px;
+background-color: black;
+color: #fff;
+text-align: center;
+border-radius: 6px;
+padding: 5px 0;
+
+/* Position the tooltip */
+position: absolute;
+z-index: 1;
+}
+  
+.tooltip:hover .tooltiptext {
+visibility: visible;
+}
+
+
+/* The container */
+.container {
+	display: block;
+	position: relative;
+	padding-left: 35px;
+	margin-bottom: 12px;
+	cursor: pointer;
+	font-size: 22px;
+	-webkit-user-select: none;
+	-moz-user-select: none;
+	-ms-user-select: none;
+	user-select: none;
+  }
+  
+/*CUSTOM CHECKBOXES*/
+/* The container */
+.container {
+	display: inline;
+	position: relative;
+	padding-left: 30px;
+	margin-bottom: 12px;
+	cursor: pointer;
+	font-size: 22px;
+	-webkit-user-select: none;
+	-moz-user-select: none;
+	-ms-user-select: none;
+	user-select: none;
+}
+
+/* Hide the browser's default checkbox */
+.container input {
+position: absolute;
+opacity: 0;
+cursor: pointer;
+height: 0;
+width: 0;
+}
+
+/* Create a custom checkbox */
+.checkmark {
+position: absolute;
+top: 0;
+left: 0;
+height: 20px;
+width: 20px;
+background-color: #eee;
+}
+
+
+/* Create the checkmark/indicator (hidden when not checked) */
+.checkmark:after {
+content: "";
+position: absolute;
+display: none;
+}
+
+/* Show the checkmark when checked */
+.container input:checked ~ .checkmark:after {
+display: block;
+}
+
+/* Style the checkmark/indicator */
+.container .checkmark:after {
+left: 9px;
+top: 5px;
+width: 5px;
+height: 10px;
+border: solid white;
+border-width: 0 3px 3px 0;
+-webkit-transform: rotate(45deg);
+-ms-transform: rotate(45deg);
+transform: rotate(45deg);
+}
+

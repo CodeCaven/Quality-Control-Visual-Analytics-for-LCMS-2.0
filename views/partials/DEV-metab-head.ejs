@@ -1,0 +1,4077 @@
+<head>
+    <title>LC-MS Quality Control</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://kit.fontawesome.com/f77ac44772.js" crossorigin="anonymous"></script> <!--Font Awesome icons-->
+    <script src="./javascripts/DEV-control.js"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.16.0/umd/popper.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script src="https://d3js.org/d3.v6.js"></script> <!--D3-->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <link rel="stylesheet" type="text/css" href="./stylesheets/DEV-style.css"  />
+    <script type="text/javascript">
+
+        // ISSUES
+        // - qcmips pressures at 25
+        // - days since conversion
+        // - qcmips left control not disabled and summary and area,height (data controller issue?)
+        // - date pass to chart page
+        // - chrome overflow
+        // - bottom axes removed by grid (top charts only)
+        // - no chrom data return opacity
+
+        // 2DO
+        // - set heights without offset
+        // - make x values global and get at start
+        // - check tailing/assymetry units (dimesionless)
+        // - heat maps
+        // - box lower y scale rt,asym, tail, fwhm set to 0 plus upper limit
+
+        /* machine_data object structure (after load)*/
+
+        /*components (Array #COMPONENTS){
+            component_name
+            component_mode
+            component_id
+            colour
+            chromatograms (Array #RUNS) {
+                exp_rt
+                intensities (Array #READINGS)
+                rts (Array #READINGS)
+                mz
+            }
+            lcms_metrics{
+                metric_name{
+                    values (Array #RUNS) 
+                    missing (Array #MISSING)
+                } 
+            }
+            stats{
+                metric_name{
+                    mean
+                    std
+                    min
+                    max
+                    25_percent
+                    50_percent
+                    75_percent
+                }
+            }
+        }
+         lcms_metrics (Array #METRICS){
+            display_order
+            display_name
+            metric_id
+            yScale
+            xScale
+            lineWidth
+            radius
+            thresholds{
+                threshold_trigger
+                threshold_low
+                threshold_high
+            }
+        }
+         machine_details{
+            display_metric
+            experiment
+            machine_name
+            machine_type
+        }
+        pressure_metrics (Array #METRICS){
+            display_order
+            display_name
+            yScale
+            xScale
+            lineWidth
+            radius
+            values (Array #RUNS)
+            missing (Array #MISSING)
+            stats{
+                mean
+                std
+                min
+                max
+                25_percent
+                50_percent
+                75_percent
+            }
+        }
+        run_data (Array #RUNS){
+            run_id
+            date_time
+            pressure_profile{
+                intensities
+                rts
+            }
+            summary{
+                metric_name{
+                    component (Array 1)
+                }
+            }
+        }
+        */
+
+        /* FUNCTIONS 
+        *EVENT document.onmouseover - handles the tooltips display 
+        *EVENT document.onmouseout - handles tooltip removal 
+        *EVENT document.onclick - handles page reload or change 
+        *create_navbar_dropdown - adds machines to charts dropdown
+        *diff_days - returns number of days between a data and current day
+        *getTime - creates the time without seconds 
+        create_layout - creates the grid layout
+        create_pressure_profile - creates the pressure profile interface
+        create_header_display - creates the header display and controls
+        create_chromatogram - creates the chromatogram display interface
+        create_components_menu - creates the components menu and check boxes
+        create_chart_area - creates the main chart display interface
+        draw_pressure_profile - draws the pressure profile
+            - updateChart - updates the chart for x-zoom
+        draw_chromatogram - draws the chromatogram
+            - updateChart - updates the chart for x-zoom
+        draw_line_chart - draws the line chart for lcms metrics
+            - updateZoom - updates the chart for xy-zoom
+        draw_pressure_line - draws the line chart for pressure metrics
+            - updateZoom - updates the chart for xy-zoom
+        getThresholds - returns the low and high threshold markers for display metric (if any)
+        updateCircles - transitions the circle positions on box chart
+        updatePressureCircles - transitions the circle positions on pressure box chart
+        draw_box_plot - draws the box plots for lcms metrics
+        draw_pressure_plot - draws the box plots for presure metrics
+        draw_heat_map - draws the heat maps for lcms metrics
+        EVENT controlUpdate - updates chromatogram, pressurre profile and header display (LR)
+        EVENT controlDouble - updates chromatogram, pressurre profile and header display (double arrow)
+        EVENT reSize - redraws charts on page resize
+        EVENT clickComponent - handles click of component and redraws main chart or chromatogram
+        EVENT updateChartType - changes between charts (line,box,heat)
+        EVENT radioUpdate - changes between metrics from radio controls
+        */
+
+        // get machine data from controller
+        let machine_data = <%-JSON.stringify(ejs_machine_data)%>;
+
+        // get all machine names from storage for nav bar
+        var proteomics = JSON.parse(sessionStorage.getItem("proteomics-machines"));
+        var metabolomics = JSON.parse(sessionStorage.getItem("metabolomics-machines"));
+
+        // set layout variables
+        let offset = 200; // allow for toolbars and nav
+        let chart_height = parseInt((screen.availHeight-offset)*2/3)/16; // in rem at 16
+        let header_height = parseInt((screen.availHeight-offset)*1/3)/16;
+        
+        // state variables
+        let run_index = 0; 
+        let comp_index = 0;
+        let display_metric = machine_data.machine_details.display_metric;
+        let chart_type = "line";
+        let metric_type = "lcms";
+
+        // global variables
+        let xScale_chrom = null;
+        let xScale_pressure = null;
+        let xScale_chart = null;
+        let yScale_chart = null;
+        let yScale_box = null;
+        let xScale_box = null;
+        let box_area_height = null;
+        let tooltipElem; // tooltip for interface
+        let zoom = false;
+        let base_radius = 3;
+        let radius = base_radius; // min for line charts (scales on zoom)
+        let box_radius = 5;
+        let base_line_width = 2;
+        let lineWidth = base_line_width; // min for line charts (scales on zoom)
+        let y_labels = {"Mass Error (ppm)": "Parts Per Million",
+                        "Mass Error (mDa)": "Milli Dalton",
+                        "Retention Time": "Minutes",
+                        "Area (normalised)" : "Log Normalised (Median)",
+                        "Height (normalised)": "Log Normalised (Median)",
+                        "Full Width Half Maximum": "Seconds",
+                        "Tailing": "Seconds",
+                        "Asymmetry": "Seconds"} // check tailing and asymmetry
+      
+        // convert dates, pressure profile and summary
+        for(let i in machine_data.run_data){
+            // dates
+            machine_data.run_data[i].date_time = new Date(machine_data.run_data[i].date_time);
+
+            // summaries
+            try{
+                var summary = JSON.parse(machine_data.run_data[i].summary[0].summary);
+                machine_data.run_data[i].summary = summary;
+                }
+                catch(e){ // undefined, no summary data (should always be!!)
+                    machine_data.run_data[i].summary = false;
+                    //console.log(e);
+            }
+
+            // pressure
+            if(machine_data.machine_details.machine_type == "thermo"){ // pressure profile thermo only
+                try{
+                    var profile = JSON.parse(machine_data.run_data[i].pressure_profile[0][0].pressure_data);
+                    machine_data.run_data[i].pressure_profile = profile;
+                }
+                catch(e){ // undefined, no pressure data
+                    machine_data.run_data[i].pressure_profile = {};
+                }
+            }
+        }
+        
+        // convert chromatograms
+        for(let i in machine_data.components){
+            for(let j in machine_data.components[i].chromatograms){
+                try{
+                    var new_chrom_data = JSON.parse(machine_data.components[i].chromatograms[j][0].chrom_data);
+                    machine_data.components[i].chromatograms[j] = new_chrom_data;
+                }
+                catch{ // no chrom data
+                    machine_data.components[i].chromatograms[j] = {};
+                }
+            }
+        } 
+
+        // colours (12 components max per mode.. set in config)
+        // https://github.com/d3/d3-scale-chromatic
+        
+        var neg_colours = d3.schemeCategory10; // 10 colours
+        var pos_colours = d3.schemeDark2; // 8 colours
+        var extra_colours = d3.schemeAccent; // 8 colours
+
+        // add 4 pos
+        for(let i = extra_colours.length - 1; i> extra_colours.length - 5; i--){
+            pos_colours.push(extra_colours[i]);
+        }
+
+        // add 2 neg
+        neg_colours.push(extra_colours[0]);
+        neg_colours.push(extra_colours[1]);
+
+        var n_index = 0;
+        var p_index = 0;
+        for(let i in machine_data.components){
+            if(machine_data.components[i].component_mode == "P"){
+                machine_data.components[i]["colour"] = pos_colours[p_index];
+                p_index +=1;
+            }
+            else if(machine_data.components[i].component_mode == "N"){
+                machine_data.components[i]["colour"] = neg_colours[n_index];
+                n_index +=1;
+            }
+        }
+
+        /* Impute Missing Values - LCMS*/
+        // mda, ppm +- 1000
+        // RT, FWHM 0
+        // Area Height -100
+        // Tailing, Asymmetry 0,1
+        // REFACTOR?: set missings to null in processing and catch here
+        var impute_names = ["Mass Error (ppm)", "Mass Error (mDa)", "Area (normalised)", "Height (normalised)"];
+        for(let i in machine_data.components){
+            var metric_data = machine_data.components[i].lcms_metrics;
+            // loop metrics
+            for(let metric in metric_data){
+                var missing_indexes = []; // add marker on chart
+                // values in array
+                for(let value in metric_data[metric]){
+                    if(impute_names.includes(metric)){
+                        if(metric_data[metric][value] <= -100 || metric_data[metric][value] >= 100){ 
+                            if(value > 0){
+                                machine_data.components[i].lcms_metrics[metric][value] = machine_data.components[i].lcms_metrics[metric][value - 1];
+                                missing_indexes.push(parseInt(value));
+                            }
+                            else{ // if first then just set to zero
+                                machine_data.components[i].lcms_metrics[metric][value] = 0;
+                                missing_indexes.push(parseInt(value));
+                            }
+                        }
+                    }
+                    else{
+                        if(metric_data[metric][value] == 0 || metric_data[metric][value] == 1){
+                            if(value > 0){
+                                machine_data.components[i].lcms_metrics[metric][value] = machine_data.components[i].lcms_metrics[metric][value - 1];
+                                missing_indexes.push(parseInt(value));
+    
+                            }
+                            else{ // if first then just set to zero
+                                machine_data.components[i].lcms_metrics[metric][value] = 0;
+                                missing_indexes.push(parseInt(value));
+                            }
+                        }
+                    }  
+                }
+                // add new values and missing to machine_data obj
+                var values = machine_data.components[i].lcms_metrics[metric];
+                machine_data.components[i].lcms_metrics[metric] = {"values": values, "missing": missing_indexes}   
+            }
+        }
+
+        /* Impute Missing Values - Pressure*/
+        /* Possible nulls but may change in processing */
+        if(machine_data.machine_details.machine_type == "thermo"){
+            for(let i in machine_data.pressure_metrics){
+                var missing_indexes = [];
+                for(let value in machine_data.pressure_metrics[i].values){
+                    var new_value = machine_data.pressure_metrics[i].values[value];
+                    if(new_value == null){
+                        if(value==0){ // if first just put to zero
+                            machine_data.pressure_metrics[i].values[value] = 0
+                            missing_indexes.push(parseInt(value));
+                        }
+                        else{
+                            machine_data.pressure_metrics[i].values[value] = machine_data.pressure_metrics[i].values[value-1];
+                            missing_indexes.push(parseInt(value));
+                        }
+                    }
+                }
+                machine_data.pressure_metrics[i]["missing"] = missing_indexes;
+            }
+        }
+
+        if(machine_data.machine_details.machine_type == "thermo"){
+        // catch mismatch of #RUNS to metric values (less MIPS in testing)
+            for(let i in machine_data.pressure_metrics){
+                var new_index = machine_data.pressure_metrics[i].values.length;
+                while(machine_data.pressure_metrics[i].values.length != machine_data.run_data.length){
+                    machine_data.pressure_metrics[i].values.push(0);
+                    machine_data.pressure_metrics[i].missing.push(new_index);
+                    new_index += 1;
+                }
+            }
+        }
+
+        // add yscale/xscale storage for zoom LCMS
+        for(let i in machine_data.lcms_metrics){
+            machine_data.lcms_metrics[i].yScale = null;
+            machine_data.lcms_metrics[i].xScale = null;
+            machine_data.lcms_metrics[i].lineWidth = null;
+            machine_data.lcms_metrics[i].radius = null;
+        }
+
+        if(machine_data.machine_details.machine_type == "thermo"){
+            // add yscale/xscale storage for zoom PRESSURE
+            for(let i in machine_data.pressure_metrics){
+                machine_data.pressure_metrics[i].yScale = null;
+                machine_data.pressure_metrics[i].xScale = null;
+                machine_data.pressure_metrics[i].lineWidth = null;
+                machine_data.pressure_metrics[i].radius = null;
+            }
+        }
+        
+
+        // DOM loaded callback
+		document.addEventListener('DOMContentLoaded', function() {
+
+            // update home tooltip
+            var home = document.getElementById("home");
+            home.setAttribute("data-tooltip", "Click for Summary Page");
+
+            // create a global tooltip for charts
+            let tooltip = d3.select("body") 
+                .append("div")
+                .attr("class", "chartTooltip")
+                .attr("id", "tooltip")
+                .style("visibility", "hidden");
+
+            create_navbar_dropdown();
+            create_layout();
+            create_pressure_profile();
+            create_header_display();
+            create_chromatogram();
+            create_components_menu();
+            create_chart_area();
+
+            // display metric logic and checks
+            if(display_metric == "Mass Error ppm (Negative)"){ // test this
+                display_metric = "Mass Error (ppm)";
+                document.getElementById("chart_header").innerHTML = display_metric.toUpperCase();
+                var neg_checks = document.getElementsByName("negative");
+                for(let i=0; i<neg_checks.length; i++){
+                    neg_checks[i].checked = true;
+                }
+            }
+            else if(display_metric == "Mass Error ppm (Positive)"){
+                display_metric = "Mass Error (ppm)";
+                document.getElementById("chart_header").innerHTML = display_metric.toUpperCase();
+                var pos_checks = document.getElementsByName("positive");
+                for(let i=0; i<pos_checks.length; i++){
+                    pos_checks[i].checked = true;
+                }
+            }
+            else{ // check all
+                var neg_checks = document.getElementsByName("negative");
+                var pos_checks = document.getElementsByName("positive");
+                for(let i=0; i<neg_checks.length; i++){
+                    neg_checks[i].checked = true;
+                }
+                for(let i=0; i<pos_checks.length; i++){
+                    pos_checks[i].checked = true;
+                }
+            }
+
+            // needs display metric
+            create_metric_menu(true);
+            
+            // draw initial line chart
+            draw_line_chart(false);
+
+        }, false);
+        
+        function create_layout(){
+            // get grid
+            var grid = document.getElementById("grid");
+
+            // create firt row
+            var first_row = document.createElement("div");
+            first_row.className = "row";
+            //first_row.style.height = header_height + "rem";
+
+            // chromatogram
+            var new_col_1 = document.createElement("div");
+            new_col_1.className = "col-sm-3 chart-cell";
+            new_col_1.style.height = header_height + "rem"; 
+            new_col_1.id = "cgram";
+            first_row.append(new_col_1);
+
+            // header display area
+            var new_col_2 = document.createElement("div");
+            new_col_2.className = "col-sm-6 chart-cell";
+            new_col_2.style.height = header_height + "rem"; // may need to add to other cols
+            new_col_2.id = "header";
+            first_row.append(new_col_2);
+
+            // pressure profile
+            var new_col_3 = document.createElement("div");
+            new_col_3.className = "col-sm-3 chart-cell";
+            new_col_3.style.height = header_height + "rem";
+            new_col_3.id = "pressure";
+            first_row.append(new_col_3);
+
+            // second row
+            var second_row = document.createElement("div");
+            second_row.className = "row";
+            second_row.style.height = chart_height + "rem";
+
+            // components
+            var new2_col_1 = document.createElement("div");
+            new2_col_1.className = "col-sm-3 chart-cell";
+            new2_col_1.style.height = chart_height + "rem";
+            new2_col_1.id = "components";
+            second_row.append(new2_col_1);
+
+            // chart area
+            var new2_col_2 = document.createElement("div");
+            new2_col_2.className = "col-sm-6 chart-cell";
+            new2_col_2.style.height = chart_height + "rem";
+            new2_col_2.id = "chart";
+            second_row.append(new2_col_2);
+
+            // menu
+            var new2_col_3 = document.createElement("div");
+            new2_col_3.className = "col-sm-3 chart-cell";
+            new2_col_3.style.height = chart_height + "rem";
+            new2_col_3.id = "menu";
+            second_row.append(new2_col_3);
+
+            // add rows to grid
+            grid.append(first_row);
+            grid.append(second_row);
+        }
+
+        function create_pressure_profile(){
+            // get container
+            var profile_div = document.getElementById("pressure");
+
+            // div for content (add flip tile for proteomics: 2 pumps)
+            var profile_inner = document.createElement("div");
+            profile_inner.style.position = "absolute";
+            profile_inner.style.left = "2.5%";
+            profile_inner.style.top = "2.5%"; 
+            profile_inner.style.width = "95%";
+            profile_inner.style.height = "95%";
+            profile_inner.style.backgroundColor = "white";
+            profile_inner.style.border = "0.3em double var(--dark)";
+            profile_inner.style.borderRadius = "0.3em";
+            profile_inner.style.boxShadow = "10px 10px 5px var(--gray)";
+            profile_inner.style.fontSize = "1rem";
+            profile_inner.style.opacity = 0;
+            profile_inner.style.overflow = "auto";
+            profile_inner.id = "profile_inner";
+            
+            // header
+            var profile_header = document.createElement("p");
+            profile_header.innerHTML = "PRESSURE PROFILE";
+            profile_header.style.backgroundColor = "var(--dark)";
+            profile_header.style.color = "var(--white)";
+            profile_header.className = "text-center";
+            profile_header.style.fontSize = "0.6em";
+            profile_header.style.height = "9%";
+            profile_header.style.letterSpacing = "4px";
+            profile_header.id = "profile_header";
+
+            // pump header
+            var profile_pump_header = document.createElement("p");
+            profile_pump_header.innerHTML = "Main Pump";
+            profile_pump_header.style.backgroundColor = "lightgray";
+            profile_pump_header.style.color = "var(--dark)";
+            profile_pump_header.style.fontWeight = "bold";
+            profile_pump_header.className = "text-center";
+            profile_pump_header.style.fontSize = "0.6em";
+            profile_pump_header.style.height = "9%";
+            profile_pump_header.style.letterSpacing = "4px";
+            profile_pump_header.id = "profile_pump_header";
+
+            // append headers and inner 
+            profile_inner.append(profile_header);
+            profile_inner.append(profile_pump_header);
+
+            // plot area 
+            var plot_area = document.createElement("div");
+            plot_area.id = "plot_pressure";
+            plot_area.style.width = "100%";
+            plot_area.style.height = "82%";
+            plot_area.style.opacity = 0;
+
+            // put on overlay if not thermo
+            if(machine_data.machine_details.machine_type != "thermo"){
+                plot_area.style.backgroundColor = "var(--dark)";
+                plot_area.style.opacity = 0;
+                var new_display = document.createElement("p");
+                new_display.className = "text-center";
+                new_display.innerHTML = "No Pressure Data";
+                new_display.style.position = "absolute";
+                new_display.style.left = "50%";
+                new_display.style.top = "50%";
+                new_display.style.transform = "translate(-50%, -50%)";
+                new_display.style.color = "white";
+                new_display.style.opacity = 1;
+                new_display.id = "pressure_overlay";
+                plot_area.append(new_display);
+                var t = d3.transition().duration(1500);
+                d3.select("#plot_pressure").transition(t).style("opacity", 0.5);
+
+            }
+            profile_inner.append(plot_area);
+            profile_div.append(profile_inner);
+
+            // draw the profile for thermo machines
+            if(machine_data.machine_details.machine_type == "thermo"){ 
+                draw_pressure_profile(false);
+            }
+
+            // transition on load
+            var t = d3.transition().duration(1500);
+            d3.select("#profile_inner").transition(t).style("opacity", 1);
+
+        }
+
+        function create_chromatogram(){
+            // get container
+            var cgram_div = document.getElementById("cgram");
+
+            // div for content
+            var cgram_inner = document.createElement("div");
+            cgram_inner.style.position = "absolute";
+            cgram_inner.style.left = "2.5%";
+            cgram_inner.style.top = "2.5%"; 
+            cgram_inner.style.width = "95%";
+            cgram_inner.style.height = "95%";
+            cgram_inner.style.backgroundColor = "white";
+            cgram_inner.style.border = "0.3em double var(--dark)";
+            cgram_inner.style.borderRadius = "0.3em";
+            cgram_inner.style.boxShadow = "10px 10px 5px var(--gray)";
+            cgram_inner.style.fontSize = "1rem";
+            cgram_inner.style.opacity = 0;
+            cgram_inner.style.overflow = "auto";
+            cgram_inner.id = "cgram_inner";
+
+            // cgram header
+            var cgram_header = document.createElement("p");
+            cgram_header.innerHTML = "CHROMATOGRAM";
+            cgram_header.style.backgroundColor = "var(--dark)";
+            cgram_header.style.color = "var(--white)";
+            cgram_header.className = "text-center";
+            cgram_header.style.fontSize = "0.6em";
+            cgram_header.style.height = "9%";
+            cgram_header.style.letterSpacing = "4px";
+            cgram_header.id = "cgram_header";
+
+            // cgram metric header
+            var cgram_metric_header = document.createElement("p");
+            cgram_metric_header.style.backgroundColor = "lightgray";
+            cgram_metric_header.style.color = "var(--dark)";
+            cgram_metric_header.style.fontWeight = "bold";
+            cgram_metric_header.className = "text-center";
+            cgram_metric_header.style.fontSize = "0.6em";
+            cgram_metric_header.style.height = "9%";
+            cgram_metric_header.style.letterSpacing = "4px";
+            cgram_metric_header.id = "cgram_metric_header";
+
+            // plot area 
+            var plot_area = document.createElement("div");
+            plot_area.id = "plot_cgram";
+            plot_area.style.width = "100%";
+            plot_area.style.height = "82%";
+            plot_area.style.opacity = 0;
+
+            // append
+            cgram_inner.append(cgram_header);
+            cgram_inner.append(cgram_metric_header);
+            cgram_inner.append(plot_area);
+            cgram_div.append(cgram_inner);
+
+            // draw
+            draw_chromatogram(false);
+
+            // transition on load
+            var t = d3.transition().duration(1500);
+            d3.select("#cgram_inner").transition(t).style("opacity", 1);
+        }
+
+        function create_components_menu(){
+            // get container
+            var comp_menu_div = document.getElementById("components");
+
+            // div for content
+            var comp_menu_inner = document.createElement("div");
+            comp_menu_inner.style.position = "absolute";
+            comp_menu_inner.style.left = "2.5%";
+            comp_menu_inner.style.top = "2.5%"; 
+            comp_menu_inner.style.width = "95%";
+            comp_menu_inner.style.height = "95%";
+            comp_menu_inner.style.fontSize = "1rem";
+            comp_menu_inner.style.opacity = 0;
+            comp_menu_inner.id = "comp_menu_inner";
+
+            // add check boxes and labels
+
+            // mode arrays (make global?)
+            var positive = [];
+            var negative = [];
+            for(let i=0; i<machine_data.components.length; i++){
+                var new_comp ={"component_name": machine_data.components[i].component_name,
+                                    "colour": machine_data.components[i].colour,
+                                    "c_index": i}
+                if(machine_data.components[i].component_mode == "P"){
+                    positive.push(new_comp);
+                }
+                else if(machine_data.components[i].component_mode == "N"){
+                    negative.push(new_comp);
+                }
+            }
+            
+            /* menu left (positive) */
+            var menu_left_div = document.createElement("div");
+            menu_left_div.style.position = "absolute";
+            menu_left_div.style.width = "50%";
+            menu_left_div.style.height = "100%";
+            menu_left_div.style.top = 0;
+            menu_left_div.style.left = 0;
+            menu_left_div.style.backgroundColor = "whitesmoke";
+            menu_left_div.style.overflow = "auto";
+            menu_left_div.className = "text-center";
+
+            // title
+            var new_pos_title = document.createElement("p");
+            new_pos_title.style.letterSpacing = "4px";
+            new_pos_title.style.fontSize = "0.6em";
+            new_pos_title.style.color = "var(--white)";
+            new_pos_title.style.backgroundColor = "var(--dark)";
+            new_pos_title.className = "text-center";
+            new_pos_title.innerHTML = "POSITIVE";
+            menu_left_div.append(new_pos_title);
+
+            // checkboxes and labels
+            for(let i=0; i<positive.length; i++){
+                
+                // create custom checkbox and label
+                var new_label = document.createElement("label");
+                new_label.className = "container";
+                new_label.setAttribute("for", "p" + i);
+                new_label.setAttribute("data-c-index", positive[i].c_index);
+                new_label.innerHTML = positive[i].component_name.replace("_", " ");
+                new_label.addEventListener("click", clickComponent);
+                var new_input = document.createElement("input");
+                new_input.setAttribute("type", "checkbox");
+                new_input.id = "p" + i;
+                new_input.setAttribute("name", "positive");
+                var new_span = document.createElement("span");
+                new_span.className = "checkmark";
+                new_span.style.backgroundColor = positive[i].colour;
+
+                // append to DOM
+                //new_label.append(new_p);
+                new_label.append(new_input);
+                new_label.append(new_span);
+                menu_left_div.append(new_label);
+            }
+
+            // add select all
+            var new_label = document.createElement("label");
+            new_label.className = "container control";
+            new_label.id = "pos_sa";
+            new_label.setAttribute("data-c-index", -1);
+            new_label.innerHTML = "SELECT ALL";
+            new_label.addEventListener("click", clickComponent);
+            new_label.style.borderRadius = "0.2em";
+            new_label.style.width = "90%";
+            new_label.style.marginLeft = "auto";
+            new_label.style.marginRight = "auto";
+            new_label.style.backgroundColor = "var(--dark)";
+            new_label.style.color = "var(--white)";
+            var new_label_right = new_label.cloneNode(true); //clone for right
+            new_label_right.addEventListener("click", clickComponent);
+            new_label_right.id = "neg_sa";
+            menu_left_div.append(new_label);
+            
+            /* menu right (negative) */
+            var menu_right_div = document.createElement("div");
+            menu_right_div.style.position = "absolute";
+            menu_right_div.style.width = "50%";
+            menu_right_div.style.height = "100%";
+            menu_right_div.style.top = 0;
+            menu_right_div.style.left = "50%";
+            menu_right_div.style.overflow = "auto";
+            menu_right_div.className = "text-center";
+
+            // title
+            var new_neg_title = document.createElement("p");
+            new_neg_title.style.letterSpacing = "4px";
+            new_neg_title.style.fontSize = "0.6em";
+            new_neg_title.style.color = "var(--white)";
+            new_neg_title.style.backgroundColor = "var(--dark)";
+            new_neg_title.className = "text-center";
+            new_neg_title.innerHTML = "NEGATIVE";
+            menu_right_div.append(new_neg_title);
+
+            // checkboxes and labels
+            for(let i=0; i<negative.length; i++){
+                
+                // create custom checkbox and label
+                var new_label = document.createElement("label");
+                new_label.className = "container";
+                new_label.setAttribute("for", "n" + i);
+                new_label.setAttribute("data-c-index", negative[i].c_index);
+                new_label.innerHTML = negative[i].component_name.replace("_", " ");
+                new_label.addEventListener("click", clickComponent);
+                var new_input = document.createElement("input");
+                new_input.setAttribute("type", "checkbox");
+                new_input.id = "n" + i;
+                new_input.setAttribute("name", "negative");
+                
+                var new_span = document.createElement("span");
+                new_span.className = "checkmark";
+                new_span.style.backgroundColor = negative[i].colour;
+
+                // append to DOM
+                new_label.append(new_input);
+                new_label.append(new_span);
+                menu_right_div.append(new_label);
+
+            }
+
+            // add select all
+            menu_right_div.append(new_label_right);
+
+            //append
+            comp_menu_inner.append(menu_left_div);
+            comp_menu_inner.append(menu_right_div);
+            comp_menu_div.append(comp_menu_inner);
+
+            // transition on load
+            var t = d3.transition().duration(1500);
+            d3.select("#comp_menu_inner").transition(t).style("opacity", 1);
+        }
+
+        function draw_chromatogram(transition){
+            // get width and height of plot area
+            var plot_area = document.getElementById("plot_cgram");
+            var cgram_header = document.getElementById("cgram_header");
+            var cgram_metric_header = document.getElementById("cgram_metric_header");
+            var plot_height = plot_area.offsetHeight;
+            var plot_width = plot_area.offsetWidth;
+
+            // set metric header
+            cgram_metric_header.innerHTML = machine_data.components[comp_index].component_name.replace("_", " ");
+
+            // remove any elements in plot area
+            while (plot_area.firstChild) {
+                plot_area.removeChild(plot_area.firstChild);
+            }
+
+            // get chromatogram data (comp, run)
+            var cgram = machine_data.components[comp_index].chromatograms[run_index];
+            // no cgram overlay
+            if(Object.keys(cgram).length == 0){
+                plot_area.style.backgroundColor = "var(--dark)";
+                plot_area.style.opacity = 0;
+                var new_display = document.createElement("p");
+                new_display.className = "text-center";
+                new_display.innerHTML = "No Chromatogram Data";
+                new_display.style.position = "absolute";
+                new_display.style.left = "50%";
+                new_display.style.top = "50%";
+                new_display.style.transform = "translate(-50%, -50%)";
+                new_display.style.color = "white";
+                new_display.style.opacity = 1;
+                plot_area.append(new_display);
+                var t = d3.transition().duration(1500);
+                d3.select("#plot_cgram").transition(t).style("opacity", 0.5);
+                return;
+            }
+            else{ 
+                plot_area.style.backgroundColor = "inherit";
+                plot_area.style.opacity = 1;
+            }
+
+            // get values to plot
+            var y_values = cgram.intensities;
+            var x_values_deltas = cgram.rts;
+
+            // transform x values from deltas
+            var total = 0;
+            var x_values = [];
+            for(let x in x_values_deltas){
+                x_values.push((total + x_values_deltas[x])/60)
+                total = total + x_values_deltas[x];
+            }
+
+            // convert to d3 friendly format
+            var data = [];
+            for(let i = 0; i<y_values.length; i++){
+                let new_row = {'x': x_values[i], 'y': y_values[i]}
+                data.push(new_row);
+            }
+
+            // set the dimensions and margins of the plot
+            var margin = {top: 5, right: 5, bottom: 30, left: 70};
+            var width = plot_width - margin.left - margin.right;
+            var height = plot_height - margin.top - margin.bottom;
+
+            // append the svg object to the plot area
+            var svg = d3.select("#plot_cgram")
+            .append("svg")
+                .attr("width", plot_width)
+                .attr("height", plot_height)
+            .append("g")
+                .attr("transform",
+                    "translate(" + margin.left + "," + margin.top + ")");
+
+            // x scale
+            if(xScale_chrom == null){
+                xScale_chrom = d3.scaleLinear()
+                .domain(d3.extent(data, function(d) { return d.x; }))
+                .range([0, width]);
+            }
+           
+            // y-scale
+            var yScale = d3.scaleLinear()
+            .domain([0, d3.max(y_values)])
+            .range([height, 0]);
+          
+            // x-axis 
+            var x_axis = d3.axisBottom().scale(xScale_chrom).tickSize(2).ticks(5).tickSizeOuter(0);
+
+            // x-axis call (store for zoom)
+            var x_axis_call = svg.append("g")
+            .attr("transform", "translate(0," + height + ")")
+            .call(x_axis); // svg (0.0) is top left
+
+            // grid x 
+            // https://stackoverflow.com/questions/13669239/remove-end-ticks-from-d3-js-axis
+            // removes bottom axes ??
+            var xAxisGrid = d3.axisBottom().scale(xScale_chrom)
+            .tickSize(-height).tickFormat('').ticks(5).tickSizeOuter(0);
+
+            // grid call x
+            var x_axis_grid_call = svg.append("g")
+            .attr('class', 'axis-grid')
+            .attr('transform', 'translate(0,' + height + ')')
+            .call(xAxisGrid);
+
+            // y-axis
+            var y_axis = d3.axisLeft().ticks(5).scale(yScale)
+            .tickSize(2).tickSizeOuter(0);
+
+            // grid y
+            var yAxisGrid = d3.axisLeft().scale(yScale).
+            tickSize(-width).tickFormat('').ticks(5).tickSizeOuter(0);
+
+            // grid y call
+            svg.append("g")
+            .attr('class', 'axis-grid')
+            .call(yAxisGrid);
+
+            // y-axis calls
+            svg.append("g")
+                .call(y_axis);
+
+            // xlabel
+            svg.append("text")
+                .attr("class", "label")
+                .attr("text-anchor", "middle")
+                .attr("x", width / 2)
+                .attr("y", height + margin.bottom - 5)
+                .text("MINUTES");
+
+            // ylabel
+            svg.append("text")
+            .attr("transform", "rotate(-90)")
+            .attr("class", "label")
+            .attr("y", 0 - margin.left)
+            .attr("x",0 - (height / 2))
+            .attr("dy", "1em")
+            .style("text-anchor", "middle")
+            .text("INTENSITY");
+            
+            /*ZOOM*/
+            /*https://www.d3-graph-gallery.com/graph/line_brushZoom.html*/
+
+            // Add a clipPath: everything out of this area won't be drawn.
+            var clip = svg.append("defs").append("svg:clipPath")
+                .attr("id", "clip2") // don't use same id in other charts
+                .append("svg:rect")
+                .attr("width", width)
+                .attr("height", height)
+                .attr("x",0)
+                .attr("y",0);
+
+            // Add brushing
+            var brush = d3.brushX()                   
+                .extent([[0,0], [width,height]]) 
+                .on("end", updateChart);
+
+            // Create the line variable: where both the line and the brush take place
+            var line = svg.append('g')
+            .attr("clip-path", "url(#clip2)");
+            
+            //draw the profile 
+            line.append("path")
+            .datum(data)
+            .attr("fill", "none")
+            .attr("class", "line") // used to redraw for zoom
+            .attr("stroke", "var(--info)")
+            .attr("stroke-width", 2)
+            .attr("d", d3.line()
+                .x(function(d, i) {return xScale_chrom(d.x)})
+                .y(function(d, i) {return yScale(d.y)})
+                );
+
+            // Add the brushing
+            line
+            .append("g")
+                .attr("class", "brush")
+                .call(brush);
+
+            // Function that updates the chart for given boundaries
+            // d3 passes the event to the function in v6 (not in v4)
+            function updateChart(event) {
+
+                // What are the selected boundaries?
+                extent = event.selection;
+
+                // If no selection just return
+                if(!extent){
+                    return;
+                }else{
+                    xScale_chrom.domain([xScale_chrom.invert(extent[0]), xScale_chrom.invert(extent[1])])
+                    line.select(".brush").call(brush.move, null) // This remove the grey brush area 
+                }
+                
+                // Update axis and line position
+                x_axis_call.transition().duration(1000).call(x_axis);
+                x_axis_grid_call.transition().duration(1000).call(xAxisGrid);
+                line
+                    .select('.line')
+                    .transition()
+                    .duration(1000)
+                    .attr("d", d3.line()
+                        .x(function(d, i) {return xScale_chrom(d.x)})
+                        .y(function(d, i) {return yScale(d.y)})
+                        );
+            }
+
+            // If user double click, reinitialize the chart
+            svg.on("dblclick",function(){
+                xScale_chrom.domain([d3.min(x_values), d3.max(x_values)])
+                x_axis_call.transition().duration(1000).call(x_axis)
+                x_axis_grid_call.transition().duration(1000).call(xAxisGrid);
+                line
+                    .select('.line')
+                    .transition()
+                    .duration(1000)
+                    .attr("d", d3.line()
+                            .x(function(d, i) {return xScale_chrom(d.x)})
+                            .y(function(d, i) {return yScale(d.y)})
+                            )
+            });
+           
+            // add transition
+            if(transition == true){
+                svg.style("opacity", 0).transition().duration(1000).style("opacity", 1);
+            }
+        }
+
+        function draw_pressure_profile(transition){
+            
+            // get width and height of plot area
+            var plot_area = document.getElementById("plot_pressure");
+            var profile_header = document.getElementById("profile_header");
+            var profile_pump_header = document.getElementById("profile_pump_header");
+            var plot_height = plot_area.offsetHeight;
+            var plot_width = plot_area.offsetWidth;
+            
+        
+            // remove any elements in plot area
+            while (plot_area.firstChild) {
+                plot_area.removeChild(plot_area.firstChild);
+            }
+
+            // no profiles overlay
+            var profile = machine_data.run_data[run_index].pressure_profile;
+            if(Object.keys(profile).length == 0){
+                plot_area.style.backgroundColor = "var(--dark)";
+                plot_area.style.opacity = 0;
+                var new_display = document.createElement("p");
+                new_display.className = "text-center";
+                new_display.innerHTML = "No Pressure Data";
+                new_display.style.position = "absolute";
+                new_display.style.left = "50%";
+                new_display.style.top = "50%";
+                new_display.style.transform = "translate(-50%, -50%)";
+                new_display.style.color = "white";
+                new_display.style.opacity = 1;
+                new_display.id = "pressure_overlay";
+                plot_area.append(new_display);
+                var t = d3.transition().duration(1500);
+                d3.select("#plot_pressure").transition(t).style("opacity", 0.5);
+                return;
+            }
+            else{ 
+                plot_area.style.backgroundColor = "inherit";
+                plot_area.style.opacity = 1;
+            }
+
+            // get values to plot
+            var y_values = profile.intensities;
+            var x_values_deltas = profile.rts;
+
+            // transform x values from deltas
+            var total = 0;
+            var x_values = [];
+            for(let x in x_values_deltas){
+                x_values.push((total + x_values_deltas[x])/60)
+                total = total + x_values_deltas[x];
+            }
+
+            // convert to d3 friendly format
+            var data = [];
+            for(let i = 0; i<y_values.length; i++){
+                let new_row = {'x': x_values[i], 'y': y_values[i]}
+                data.push(new_row);
+            }
+
+            // set the dimensions and margins of the plot
+            var margin = {top: 5, right: 5, bottom: 25, left: 30};
+            var width = plot_width - margin.left - margin.right;
+            var height = plot_height - margin.top - margin.bottom;
+            
+            // append the svg object to the plot area
+            var svg = d3.select("#plot_pressure")
+            .append("svg")
+                .attr("width", plot_width)
+                .attr("height", plot_height)
+            .append("g")
+                .attr("transform",
+                    "translate(" + margin.left + "," + margin.top + ")");
+
+            // x scale
+            if(xScale_pressure == null){
+                xScale_pressure = d3.scaleLinear()
+                .domain([0, d3.max(x_values)])
+                .range([0, width]);
+            }
+           
+            // y-scale
+            var yScale = d3.scaleLinear()
+            .domain([0, d3.max(y_values)])
+            .range([height, 0]);
+          
+            // x-axis function
+            var x_axis = d3.axisBottom().ticks(5)
+            .scale(xScale_pressure).tickSize(2).tickSizeOuter(0);
+                
+            // x-axis call
+            var x_axis_call = svg.append("g")
+            .attr("transform", "translate(0," + height + ")")
+            .call(x_axis); // svg (0.0) is top left
+
+            // grid x 
+            // https://stackoverflow.com/questions/13669239/remove-end-ticks-from-d3-js-axis
+            // removes bottom axes ??
+            var xAxisGrid = d3.axisBottom().scale(xScale_pressure)
+            .tickSize(-height).tickFormat('').ticks(5).tickSizeOuter(0);
+
+            // grid call x
+            var x_axis_grid_call = svg.append("g")
+            .attr('class', 'axis-grid')
+            .attr('transform', 'translate(0,' + height + ')')
+            .call(xAxisGrid);
+             
+            // y-axis
+            var y_axis = d3.axisLeft().ticks(5).scale(yScale).tickSize(2);
+
+            // y-axis calls
+            svg.append("g")
+                .call(y_axis);
+
+            // grid y
+            var yAxisGrid = d3.axisLeft().scale(yScale).
+            tickSize(-width).tickFormat('').ticks(5).tickSizeOuter(0);
+
+            // grid y call
+            svg.append("g")
+            .attr('class', 'axis-grid')
+            .call(yAxisGrid);
+
+                
+            // xlabel
+            svg.append("text")
+                .attr("class", "label")
+                .attr("text-anchor", "middle")
+                .attr("x", width / 2)
+                .attr("y", height + margin.bottom - 3)
+                .text("MINUTES");
+
+            // ylabel
+            svg.append("text")
+            .attr("transform", "rotate(-90)")
+            .attr("class", "label")
+            .attr("y", 0 - margin.left - 1)
+            .attr("x",0 - (height / 2))
+            .attr("dy", "1em")
+            .style("text-anchor", "middle")
+            .text("BARS");
+            
+
+            /*ZOOM*/
+            /*https://www.d3-graph-gallery.com/graph/line_brushZoom.html*/
+
+            // Add a clipPath: everything out of this area won't be drawn.
+            var clip = svg.append("defs").append("svg:clipPath")
+                .attr("id", "clip") // don't use same id in other charts
+                .append("svg:rect")
+                .attr("width", width)
+                .attr("height", height)
+                .attr("x",0)
+                .attr("y",0);
+
+            // Add brushing
+            var brush = d3.brushX()                   
+                .extent([[0,0], [width,height]]) 
+                .on("end", updateChart);
+
+            // Create the line variable: where both the line and the brush take place
+            var line = svg.append('g')
+            .attr("clip-path", "url(#clip)");
+            
+            //draw the profile 
+            line.append("path")
+            .datum(data)
+            .attr("fill", "none")
+            .attr("class", "line") // used to redraw for zoom
+            .attr("stroke", "var(--info)")
+            .attr("stroke-width", 2)
+            .attr("d", d3.line()
+                .x(function(d, i) {return xScale_pressure(d.x)})
+                .y(function(d, i) {return yScale(d.y)})
+                );
+
+            // Add the brushing
+            line
+            .append("g")
+                .attr("class", "brush")
+                .call(brush);
+
+
+            // Function that updates the chart for given boundaries
+            // d3 passes the event to the function in v6 (not in v4)
+            function updateChart(event) {
+
+                // What are the selected boundaries?
+                extent = event.selection;
+
+                // If no selection just return
+                if(!extent){
+                    return;
+                }else{
+                    xScale_pressure.domain([xScale_pressure.invert(extent[0]), xScale_pressure.invert(extent[1])])
+                    line.select(".brush").call(brush.move, null) // This remove the grey brush area 
+                }
+                
+                // Update axis and line position
+                x_axis_call.transition().duration(1000).call(x_axis);
+                x_axis_grid_call.transition().duration(1000).call(xAxisGrid);
+                line
+                    .select('.line')
+                    .transition()
+                    .duration(1000)
+                    .attr("d", d3.line()
+                        .x(function(d, i) {return xScale_pressure(d.x)})
+                        .y(function(d, i) {return yScale(d.y)})
+                        );
+            }
+
+            // If user double click, reinitialize the chart
+            svg.on("dblclick",function(){
+                xScale_pressure.domain([d3.min(x_values), d3.max(x_values)]);
+                x_axis_call.transition().duration(1000).call(x_axis);
+                x_axis_grid_call.transition().duration(1000).call(xAxisGrid);
+                line
+                    .select('.line')
+                    .transition()
+                    .duration(1000)
+                    .attr("d", d3.line()
+                            .x(function(d, i) {return xScale_pressure(d.x)})
+                            .y(function(d, i) {return yScale(d.y)})
+                            )
+            });
+           
+            // add transition
+            if(transition == true){
+                svg.style("opacity", 0).transition().duration(1000).style("opacity", 1);
+            }
+        }
+
+        function create_header_display(){
+            var header_container = document.getElementById("header");
+            
+            // div for content
+            var header_inner = document.createElement("div");
+            header_inner.style.position = "absolute";
+            header_inner.style.left = "2.5%";
+            header_inner.style.top = "2.5%"; 
+            header_inner.style.width = "95%";
+            header_inner.style.height = "95%";
+            header_inner.style.opacity = 0;
+            header_inner.style.backgroundColor = "var(--white)";
+            header_inner.style.border = "0.3em double var(--dark)";
+            header_inner.style.borderRadius = "0.3em";
+            header_inner.style.boxShadow = "10px 10px 5px var(--gray)";
+            header_inner.style.fontSize = "1rem";
+            header_inner.id = "header_inner";
+            header_inner.style.overflow = "auto";
+
+            // machine name
+            var new_machine_name = document.createElement("p");
+            new_machine_name.style.fontSize = "1.5em";
+            new_machine_name.style.letterSpacing = "4px";
+            new_machine_name.style.fontWeight = "bold";
+            new_machine_name.style.color = "var(--dark)";
+            new_machine_name.innerHTML = machine_data.machine_details.machine_name;
+            new_machine_name.className = "text-center";
+
+            // experiment
+            let new_experiment = document.createElement("p");
+            new_experiment.style.fontSize = "1em";
+            new_experiment.innerHTML = machine_data.machine_details.experiment.toUpperCase();
+            // add border to metab machines
+            new_experiment.style.backgroundColor = "lightgray";
+            new_experiment.style.color = "var(--dark)"
+            new_experiment.style.width = "50%";
+            new_experiment.style.border = "0.3em double var(--dark)";
+            new_experiment.style.marginRight = "auto";
+            new_experiment.style.marginLeft = "auto";
+            new_experiment.style.letterSpacing = "4px";
+            new_experiment.className = "text-center";
+            
+            // icon
+            var summary_size = Object.keys(machine_data["run_data"][0].summary).length
+            let new_icon = document.createElement("span");
+            //new_icon.style.margin = "0px";
+            new_icon.style.padding = "0px";
+            new_icon.style.fontSize = "1.5em";
+            new_icon.id = "icon";
+            new_icon.style.marginRight = "auto";
+            new_icon.style.marginLeft = "auto";
+
+            if(summary_size > 0){
+                    new_icon.className = "fas fa-times text-danger text-center";
+                }
+                else{
+                    new_icon.className = "fas fa-check text-success text-center";
+            }
+
+            // icon div (for centering)
+            var new_icon_div = document.createElement("div");
+            new_icon_div.className = "text-center";
+            new_icon_div.append(new_icon);
+            
+            // container for time duration and controls
+            var new_container = document.createElement("div");
+            new_container.style.width = "60%";
+            new_container.style.marginRight = "auto";
+            new_container.style.marginLeft = "auto";
+
+            // left control
+            var left_control = document.createElement("span");
+            left_control.className = "fas fa-chevron-circle-left control";
+            left_control.style.padding = "0px";
+            left_control.style.float = "left";
+            left_control.id = "left-control";
+
+            // button for left control
+            var left_button = document.createElement("button");
+            left_button.className = "btn";
+            left_button.style.padding = "0px";
+            left_button.style.fontSize = "1.5em";
+            left_button.style.paddingLeft = "0.5em";
+            left_button.style.float = "left";
+            left_button.addEventListener("click", controlUpdate);
+            left_button.append(left_control);
+
+            // right control
+            var right_control = document.createElement("span");
+            right_control.className = "fas fa-chevron-circle-right";
+            right_control.style.padding = "0px";
+            right_control.style.float = "right";
+            right_control.id = "right-control";
+
+            // button for right control
+            var right_button = document.createElement("button");
+            right_button.className = "btn";
+            right_button.style.padding = "0px";
+            right_button.style.fontSize = "1.5em";
+            right_button.style.marginRight = "0.5em";
+            right_button.style.float = "right";
+            right_button.setAttribute("disabled", true); // add class outline class when enable
+            right_button.addEventListener("click", controlUpdate);
+            right_button.append(right_control);
+
+            // add double arrow for latest
+            var new_double = document.createElement("span");
+            new_double.className = "fas fa-angle-double-right";
+            new_double.style.padding = "0px";
+            new_double.style.float = "right";
+            new_double.style.display = "none";
+            new_double.id = "double";
+
+            // button for double arrow
+            var double_button = document.createElement("button");
+            double_button.className = "btn";
+            double_button.style.padding = "0px";
+            double_button.style.fontSize = "1.5em";
+            double_button.style.float = "right";
+            double_button.addEventListener("click", controlDouble);
+            double_button.append(new_double);
+
+            // days since
+            var new_date = machine_data.run_data[0].date_time;
+            var days_since = diff_days(new_date);
+            var new_duration = document.createElement("p");
+            let display_str;
+            if(days_since == 0){
+                display_str = "Today";
+            }
+            else if(days_since == 1){
+                display_str = "Yesterday";
+            }
+            else{
+                display_str = days_since.toString() + " days ago";
+            }
+            new_duration.className = "text-center";
+            new_duration.style.display = "inline_block";
+            new_duration.style.letterSpacing = "4px";
+            new_duration.style.fontWeight = "bold";
+            new_duration.innerHTML = display_str;
+            new_duration.id = "duration";
+
+            // add to container
+            new_container.append(left_button);
+            new_container.append(double_button);
+            new_container.append(right_button);
+            new_container.append(new_duration);
+
+            // date
+            var new_date_tag = document.createElement("p");
+            new_date_tag.innerHTML = new_date.toDateString();
+            new_date_tag.className = "text-center";
+            new_date_tag.style.width = "35%";
+            new_date_tag.style.marginLeft = "auto";
+            new_date_tag.style.marginRight = "auto";
+            new_date_tag.style.borderTop = "1px solid var(--dark)";
+            new_date_tag.style.borderBottom = "1px solid var(--dark)";
+            new_date_tag.style.letterSpacing = "4px";
+            new_date_tag.id = "date";
+
+            // time
+            var new_time_tag = document.createElement("p");
+            new_time_tag.style.fontSize = "1em";
+            new_time_tag.className = "text-center";
+            new_time_tag.style.letterSpacing = "4px";
+            new_time_tag.innerHTML = get_time(new_date);
+            new_time_tag.id = "time";
+
+            // add to DOM
+            header_inner.append(new_machine_name);
+            header_inner.append(new_experiment);
+            header_inner.append(new_icon_div);
+            header_inner.append(new_container);
+            header_inner.append(new_date_tag);
+            header_inner.append(new_time_tag);
+            header_container.append(header_inner);
+
+            // transition on load
+            var t = d3.transition().duration(1500);
+            d3.select("#header_inner").transition(t).style("opacity", 1);
+  
+        }
+
+        
+
+        function controlUpdate(el){
+            // get all elements
+            var icon = document.getElementById("icon");
+            var left_control = document.getElementById("left-control"); //the icons
+            var right_control = document.getElementById("right-control");
+            var duration = document.getElementById("duration");
+            var date = document.getElementById("date");
+            var time = document.getElementById("time");
+            var left_button = left_control.parentElement;
+            var right_button = right_control.parentElement;
+            var display_container = right_button.parentElement;
+            var double_control = document.getElementById("double");
+            var double_button = double_control.parentElement;
+
+            // run_index
+            if(el.currentTarget.firstChild.id == "left-control"){
+                run_index += 1;
+            }
+            else if(el.currentTarget.firstChild.id == "right-control"){
+                run_index -= 1;
+            }
+
+            // update elements
+            
+            // days since
+            var new_date = machine_data.run_data[run_index].date_time;
+            var days_since = diff_days(new_date);
+            let display_str;
+            if(days_since == 0){
+                display_str = "Today";
+            }
+            else if(days_since == 1){
+                display_str = "Yesterday";
+            }
+            else{
+                display_str = days_since.toString() + " days ago";
+            }
+            duration.innerHTML = display_str;
+
+            // icon
+            var summary_size = Object.keys(machine_data["run_data"][run_index].summary).length
+            if(summary_size > 0){
+                    icon.className = "fas fa-times text-danger text-center";
+                }
+                else{
+                    icon.className = "fas fa-check text-success text-center";
+            }
+
+            // date
+            date.innerHTML = new_date.toDateString();
+
+            // time
+            time.innerHTML = get_time(new_date);
+
+            // controls
+
+            // end left
+            if(run_index == (machine_data["run_data"].length - 1)){
+                left_control.classList.remove("control");
+                left_button.setAttribute("disabled", true);
+            }
+            
+            // end right
+            if(run_index == 0){
+                right_control.classList.remove("control");
+                right_button.setAttribute("disabled", true);
+            }
+
+            // in between
+            if(run_index > 0 && run_index < (machine_data["run_data"].length-1)){
+                left_button.removeAttribute("disabled");
+                right_button.removeAttribute("disabled");
+                if(!right_control.classList.contains("control")){
+                    right_control.classList.add("control");
+                }
+                if(!left_control.classList.contains("control")){
+                    left_control.classList.add("control");
+                }
+            }
+
+            // double arrow
+            if(run_index > 1){
+                double_control.style.display = "inline";
+                double_control.classList.add("control");
+            }
+            else{
+                double_control.style.display = "none";  
+                double_control.classList.remove("control");
+            }
+
+            // update plots
+            draw_pressure_profile(true);
+            draw_chromatogram(true);
+            
+            if(chart_type == "box"){
+                if(metric_type == "lcms"){
+                    updateCircles();
+                }
+                else if(metric_type == "pressure"){
+                    updatePressureCircles();
+                }
+            }
+            // update menu
+            create_metric_menu(false);
+        }
+
+        function updatePressureCircles(){
+            var circles = d3.selectAll("circle");
+            var lines = d3.selectAll(".extender");
+
+            // y values and missing indexes
+            var data= [];
+            for(let i in machine_data.pressure_metrics){
+                if(machine_data.pressure_metrics[i].display_name == display_metric){
+                    var new_obj = machine_data.pressure_metrics[i].stats;
+                    new_obj["missing"] = machine_data.pressure_metrics[i].missing;
+                    new_obj["current"] = machine_data.pressure_metrics[i].values[run_index];
+                    data.push(new_obj);
+                    break;
+                }
+            };
+
+            // move circles
+            circles
+                .data(data)
+                .transition()
+                .duration(1000)
+                .attr("cx", d => xScale_box(display_metric))
+                .attr("cy", function(d){
+                    // cap so does not go off chart
+                    if(yScale_box(d.current) > box_area_height){
+                        return  box_area_height;
+                    }
+                    if(yScale_box(d.current)<0){
+                        return 0;
+                    }
+                    
+                    return yScale_box(d.current)
+                })
+                .attr("fill", function(d,j){
+                    var miss = d.missing;
+                    if(miss.includes(run_index)){
+                        return "black";
+                    }
+                    else if(yScale_box(d.current) > box_area_height){
+                            return  "var(--info)";
+                        }
+                    else if(yScale_box(d.current)<0){
+                        return "var(--info)";
+                    }
+                    else{
+                        return "whitesmoke";
+                    }
+                });
+            
+            // move extenders
+            lines
+                .data(data)
+                .transition()
+                .duration(1000)
+                .attr("y1", function(d){
+                    var y1;
+                    if(d.current >= d["75_percent"]){
+                        y1 = yScale_box(d.current);
+                    }
+                    else if(d.current <= d["25_percent"]){
+                        y1 = yScale_box(d["25_percent"]);
+                    }
+                    else{
+                        y1 =  yScale_box(d.current);
+                    }
+
+                    // cap so does not go off chart
+                    if(y1 < 0){
+                        return 0;
+                    }
+                    return y1;
+                })
+                .attr("y2", function(d){
+                    var y2;
+                    if(d.current >= d["75_percent"]){
+                        y2 = yScale_box(d["75_percent"]);
+                    }
+                    else if(d.current <= d["25_percent"]){
+                        y2 = yScale_box(d.current);
+                    }
+                    else{
+                        y2 = yScale_box(d.current);
+                    }
+                    // cap so does not go off chart
+                    if(y2 > box_area_height){
+                        return box_area_height;
+                    }
+                    return y2;
+                });
+
+        }
+
+        function updateCircles(){
+            var circles = d3.selectAll("circle");
+            var lines = d3.selectAll(".extender");
+
+                // get indexes of checked components
+                var component_indexes = [];
+                var neg_checks = document.getElementsByName("negative");
+                var pos_checks = document.getElementsByName("positive");
+                for(let i in  neg_checks){
+                    if(neg_checks[i].checked){
+                        component_indexes.push(neg_checks[i].labels[0].getAttribute("data-c-index"));
+                    }
+                }
+                for(let i in  pos_checks){
+                    if(pos_checks[i].checked){
+                        component_indexes.push(pos_checks[i].labels[0].getAttribute("data-c-index"));
+                    }
+                }   
+
+                var all_boxes = [];
+                for(let i in machine_data.components){
+                    if(component_indexes.includes(i)){
+                        var new_obj = machine_data.components[i].stats[display_metric];
+                        new_obj["name"] = machine_data.components[i].component_name.replace("_", " ");
+                        new_obj["current"] = machine_data.components[i].lcms_metrics[display_metric].values[run_index];
+                        new_obj["missing"] = machine_data.components[i].lcms_metrics[display_metric].missing;
+                        new_obj["colour"] = machine_data.components[i].colour;
+                        all_boxes.push(new_obj);
+                    }
+                }
+                // sort median desc
+                 all_boxes.sort((a, b) => a["50_percent"] < b["50_percent"]) ;
+        
+                // sort polarity (pos first)
+                all_boxes.sort((a, b) => a["mode"] < b["mode"]) ;
+
+                // move circles
+                circles
+                .data(all_boxes)
+                .transition()
+                .duration(1000)
+                .attr("cx", d => xScale_box(d.name))
+                .attr("cy", function(d){
+                    // cap so does not go off chart
+                    if(yScale_box(d.current) > box_area_height){
+                        return  box_area_height;
+                    }
+                    if(yScale_box(d.current)<0){
+                        return 0;
+                    }
+                    
+                    return yScale_box(d.current)
+                })
+                .attr("fill", function(d,j){
+                    var miss = d.missing;
+                    if(miss.includes(run_index)){
+                        return "black";
+                    }
+                    else if(yScale_box(d.current) > box_area_height){
+                        return  d.colour;
+                    }
+                    else if(yScale_box(d.current)<0){
+                        return d.colour;
+                    }
+                    else{
+                        return "whitesmoke";
+                    }
+                });
+
+                // move extenders
+                lines
+                .data(all_boxes)
+                .transition()
+                .duration(1000)
+                .attr("y1", function(d){
+                    var y1;
+                    if(d.current >= d["75_percent"]){
+                        y1 = yScale_box(d.current);
+                    }
+                    else if(d.current <= d["25_percent"]){
+                        y1 = yScale_box(d["25_percent"]);
+                    }
+                    else{
+                        y1 =  yScale_box(d.current);
+                    }
+
+                    // cap so does not go off chart
+                    if(y1 < 0){
+                        return 0;
+                    }
+                    return y1;
+                })
+                .attr("y2", function(d){
+                    var y2;
+                    if(d.current >= d["75_percent"]){
+                        y2 = yScale_box(d["75_percent"]);
+                    }
+                    else if(d.current <= d["25_percent"]){
+                        y2 = yScale_box(d.current);
+                    }
+                    else{
+                        y2 = yScale_box(d.current);
+                    }
+                    // cap so does not go off chart
+                    if(y2 > box_area_height){
+                        return box_area_height;
+                    }
+                    return y2;
+                });
+        }
+
+        function controlDouble(el){
+            // get all elements
+            var icon = document.getElementById("icon");
+            var left_control = document.getElementById("left-control"); //the icons
+            var right_control = document.getElementById("right-control");
+            var duration = document.getElementById("duration");
+            var date = document.getElementById("date");
+            var time = document.getElementById("time");
+            var left_button = left_control.parentElement;
+            var right_button = right_control.parentElement;
+            var display_container = right_button.parentElement;
+            var double_control = document.getElementById("double");
+            var double_button = double_control.parentElement;
+
+            // set run_index
+            run_index = 0;
+
+            // update elements
+            
+            // days since
+            var new_date = machine_data.run_data[run_index].date_time;
+            var days_since = diff_days(new_date);
+            let display_str;
+            if(days_since == 0){
+                display_str = "Today";
+            }
+            else if(days_since == 1){
+                display_str = "Yesterday";
+            }
+            else{
+                display_str = days_since.toString() + " days ago";
+            }
+            duration.innerHTML = display_str;
+
+            // icon
+            var summary_size = Object.keys(machine_data["run_data"][run_index].summary).length
+            if(summary_size > 0){
+                    icon.className = "fas fa-times text-danger text-center";
+                }
+                else{
+                    icon.className = "fas fa-check text-success text-center";
+            }
+
+            // date
+            date.innerHTML = new_date.toDateString();
+
+            // time
+            time.innerHTML = get_time(new_date);
+
+            // controls
+            right_control.classList.remove("control");
+            right_button.setAttribute("disabled", true);
+            double_control.style.display = "none";  
+            double_control.classList.remove("control");
+            left_button.removeAttribute("disabled");
+
+            // update plots
+            draw_pressure_profile(true);
+            draw_chromatogram(true);
+            if(chart_type == "box"){
+                if(metric_type == "lcms"){
+                    updateCircles();
+                }
+                else if(metric_type == "pressure"){
+                    updatePressureCircles();
+                }
+                
+            }
+
+            // update menu
+            create_metric_menu(false);
+        }
+
+        // resize re-draw svg
+        function reSize(){
+            xScale_chrom = null;
+            xScale_pressure = null;
+            draw_pressure_profile(false);
+            draw_chromatogram(false);
+
+            // set metric scales to null if pressure
+            for(let i in machine_data.pressure_metrics){
+                machine_data.pressure_metrics[i].yScale = null;
+                machine_data.pressure_metrics[i].xScale = null;
+                machine_data.pressure_metrics[i].radius = null;
+                machine_data.pressure_metrics[i].lineWidth = null;
+            }
+
+             // set metric scales to null if lcms
+             for(let i in machine_data.lcms_metrics){
+                machine_data.lcms_metrics[i].yScale = null;
+                machine_data.lcms_metrics[i].xScale = null;
+                machine_data.lcms_metrics[i].radius = null;
+                machine_data.lcms_metrics[i].lineWidth = null;
+            }
+
+            if(chart_type == "line"){
+                if(metric_type == "lcms"){
+                    draw_line_chart(false);
+                }
+                else if(metric_type == "pressure"){
+                    draw_pressure_line(false);
+                }   
+            }
+            else if(chart_type == "box"){
+                if(metric_type == "lcms"){
+                    draw_box_plot(false);
+                }
+                else if(metric_type == "pressure"){
+                    draw_pressure_box(false);
+                }
+            }
+        }
+
+        // on click components menu
+        function clickComponent(event){
+            
+            // handle normal behaviour
+            if(event.target.hasAttribute("type")){
+                if(metric_type == "lcms"){
+                    if(!zoom){
+                        yScale_chart = null;
+                    }
+                    if(chart_type == "line"){
+                        draw_line_chart(true);
+                    }
+                    else if(chart_type == "box"){
+                        yScale_box = null;
+                        draw_box_plot(true);
+                    }
+                    
+                }
+                return;
+            }
+
+            if(event.target.hasAttribute("data-c-index")){
+                // update chromatogram or select one
+                data_index = parseInt(event.target.getAttribute("data-c-index"));
+                if(data_index != -1){
+                    comp_index = data_index; // update comp index
+                    // select one
+                    if(window.event.shiftKey){ 
+                        var neg_checks = document.getElementsByName("negative");
+                        var pos_checks = document.getElementsByName("positive");
+                        for(let i =0; i<neg_checks.length; i++){
+                            if(neg_checks[i].labels[0].getAttribute("data-c-index") == data_index){
+                                neg_checks[i].checked = true;
+                            }
+                            else{
+                                neg_checks[i].checked = false;
+                            }
+                        }
+
+                        for(let i =0; i<pos_checks.length; i++){
+                            if(pos_checks[i].labels[0].getAttribute("data-c-index") == data_index){
+                                pos_checks[i].checked = true;
+                            }
+                            else{
+                                pos_checks[i].checked = false;
+                            }
+                        }
+                        if(metric_type == "lcms"){
+                            // redraw line charts
+                            if(!zoom){
+                                yScale_chart = null;
+                            }
+                            if(chart_type == "line"){
+                                draw_line_chart(true);
+                            }
+                            else if(chart_type == "box"){
+                                yScale_box = null;
+                                draw_box_plot(true);
+                            }
+                        }
+                        draw_chromatogram(true);
+                    }// change chromatogram
+                    else{ 
+                        xScale_chrom = null;
+                        draw_chromatogram(true);
+                    }
+                    event.preventDefault(); // don't change checkbox
+                }
+                else{ // select all
+                    if(event.target.id == "neg_sa"){
+                        var neg_checks = document.getElementsByName("negative");
+                        for(let i =0; i<neg_checks.length; i++){
+                            neg_checks[i].checked = true;
+                        }
+
+                        if(metric_type == "lcms"){
+                            // redraw line charts
+                            if(!zoom){
+                                yScale_chart = null;
+                            }
+                            if(chart_type == "line"){
+                                draw_line_chart(true);
+                            }
+                            else if(chart_type == "box"){
+                                yScale_box = null;
+                                draw_box_plot(true);
+                            }
+                        }
+                    }
+                    else if(event.target.id == "pos_sa"){
+                        var pos_checks = document.getElementsByName("positive");
+                        for(let i =0; i<pos_checks.length; i++){
+                            pos_checks[i].checked = true;
+                        }
+
+                        if(metric_type == "lcms"){
+                            // redraw line charts
+                            if(!zoom){
+                                yScale_chart = null;
+                            }
+                            if(chart_type == "line"){
+                                draw_line_chart(true);
+                            }
+                            else if(chart_type == "box"){
+                                yScale_box = null;
+                                draw_box_plot(true);
+                            }
+                        }
+                    }
+
+                    // add and remove click outline
+                    event.target.style.outline = "0.3em ridge var(--dark)";
+                    setTimeout(function(){
+                        event.target.style.outline = "";
+                    }, 10);
+                }
+            }
+        }
+
+        function create_chart_area(){
+            // get container
+            var chart_div = document.getElementById("chart");
+
+            // div for content
+            var chart_inner = document.createElement("div");
+            chart_inner.style.position = "absolute";
+            chart_inner.style.left = "2.5%";
+            chart_inner.style.top = "2.5%"; 
+            chart_inner.style.width = "95%";
+            chart_inner.style.height = "95%";
+            chart_inner.style.backgroundColor = "white";
+            chart_inner.style.border = "0.3em double var(--dark)";
+            chart_inner.style.borderRadius = "0.3em";
+            chart_inner.style.boxShadow = "10px 10px 5px var(--gray)";
+            chart_inner.style.fontSize = "1rem";
+            chart_inner.style.opacity = 0;
+            chart_inner.style.overflow = "auto";
+            chart_inner.id = "chart_inner";
+
+            // chart header
+            var chart_header = document.createElement("p");
+            chart_header.innerHTML = display_metric.toUpperCase();
+            chart_header.style.backgroundColor = "lightgray";
+            chart_header.style.color = "var(--dark)";
+            chart_header.className = "text-center";
+            chart_header.style.fontSize = "1em";
+            chart_header.style.fontWeight = 600;
+            chart_header.style.height = "8%";
+            chart_header.style.letterSpacing = "4px";
+            chart_header.style.borderBottom = "0.3em double var(--dark)";
+            chart_header.id = "chart_header";
+
+            /* chart type buttons */
+
+            // container div
+            var new_bottom_div = document.createElement("div");
+            new_bottom_div.style.height = "8%";
+            new_bottom_div.style.position = "absolute";
+            new_bottom_div.style.left = 0;
+            new_bottom_div.style.bottom = 0;
+            new_bottom_div.style.width = "100%";
+            new_bottom_div.id = "chart_bottom";
+
+            // button group
+            var button_group = document.createElement("div");
+            button_group.className = "btn-group";
+            button_group.style.width = "100%";
+
+            // buttons
+
+            //line
+            var new_button_lc = document.createElement("button");
+            new_button_lc.className = "btn btn-custom";
+            new_button_lc.style.borderTop = "0.3em double var(--dark)";
+            new_button_lc.style.borderRight = "0.3em double var(--dark)";
+            new_button_lc.style.color = "var(--dark)";
+            new_button_lc.id = "line";
+            new_button_lc.setAttribute("name", "chart-buttons");
+            new_button_lc.addEventListener("click", updateChartType);
+            new_button_lc.style.backgroundColor = "lightgray";
+            new_button_lc.setAttribute("type", "button");
+            new_button_lc.innerHTML = "LINE CHARTS";
+            button_group.append(new_button_lc);
+
+            // box
+            var new_button_bp = document.createElement("button");
+            new_button_bp.className = "btn btn-custom";
+            new_button_bp.setAttribute("type", "button");
+            new_button_bp.style.borderTop = "0.3em double var(--dark)";
+            new_button_bp.style.borderRight = "0.3em double var(--dark)";
+            new_button_bp.id = "box";
+            new_button_bp.setAttribute("name", "chart-buttons");
+            new_button_bp.addEventListener("click", updateChartType);
+            new_button_bp.innerHTML = "BOX PLOTS";
+            button_group.append(new_button_bp);
+
+            //heat
+            var new_button_hm = document.createElement("button");
+            new_button_hm.className = "btn btn-custom";
+            new_button_hm.setAttribute("type", "button");
+            new_button_hm.style.borderTop = "0.3em double var(--dark)";
+            new_button_hm.id = "heat";
+            new_button_hm.setAttribute("name", "chart-buttons");
+            new_button_hm.addEventListener("click", updateChartType);
+            new_button_hm.innerHTML = "HEAT MAP";
+            button_group.append(new_button_hm);
+
+            new_bottom_div.append(button_group);
+
+            // plot area 
+            var plot_area = document.createElement("div");
+            plot_area.id = "plot_chart";
+            plot_area.style.width = "100%";
+            plot_area.style.height = "86%";
+            plot_area.style.opacity = 0;
+
+            chart_inner.append(chart_header);
+            chart_inner.append(plot_area);
+            chart_inner.append(new_bottom_div);
+            chart_div.append(chart_inner);
+
+            // transition on load
+            var t = d3.transition().duration(1500);
+            d3.select("#chart_inner").transition(t).style("opacity", 1);
+        }
+
+        function updateChartType(event){
+
+            // change background and update state
+            var buttons = document.getElementsByName("chart-buttons");
+            for(let i =0; i<buttons.length; i++){
+                buttons[i].style.backgroundColor = "var(--white)";
+            }
+            event.target.style.backgroundColor = "lightgray";
+            chart_type = event.target.id;
+
+            // radios
+            var radios = document.getElementsByName("radioOptions");
+
+            // draw chart
+            if(chart_type == "line"){
+                // enable box plots for normalised
+                for(let i = 0; i<radios.length; i++){
+                        var radio_name = radios[i].labels[0].innerText;
+                        if(radio_name == "Area (normalised)" || radio_name == "Height (normalised)"){
+                            radios[i].disabled = false;
+                        };
+                }
+                if(metric_type == "lcms"){
+                    draw_line_chart(true);
+                }
+                else{
+                    draw_pressure_line(true);
+                }
+            }
+            else if(chart_type == "box"){
+                // disable box plots for normalised
+                for(let i = 0; i<radios.length; i++){
+                        var radio_name = radios[i].labels[0].innerText;
+                        if(radio_name == "Area (normalised)" || radio_name == "Height (normalised)"){
+                            radios[i].disabled = true;
+                        };
+                }
+                if(metric_type == "lcms"){
+                    yScale_box = null;
+                    draw_box_plot(true);
+                }
+                else{
+                    draw_pressure_box(true);
+                }
+                
+            }
+            else if(chart_type == "heat"){
+        
+                // enable box plots for normalised
+                for(let i = 0; i<radios.length; i++){
+                        var radio_name = radios[i].labels[0].innerText;
+                        if(radio_name == "Area (normalised)" || radio_name ==  "Height (normalised)"){
+                            radios[i].disabled = false;
+                        };
+                }
+
+                draw_heat_map(true);
+            }
+        }
+
+        function draw_heat_map(transition){
+            // get width and height of plot area
+            var plot_area = document.getElementById("plot_chart");
+            var chart_header = document.getElementById("chart_header");
+            var chart_bottom = document.getElementById("chart_bottom");
+            var plot_height = plot_area.offsetHeight;
+            var plot_width = plot_area.offsetWidth;
+            var legend_height = plot_height/10; 
+
+            // remove any elements in plot area
+            while (plot_area.firstChild) {
+                plot_area.removeChild(plot_area.firstChild);
+            }
+            
+            if(transition){
+                plot_area.style.opacity = 0;
+                chart_header.innerHTML = display_metric.toUpperCase();
+            }
+
+            // get indexes of checked components
+            var component_indexes = [];
+            var neg_checks = document.getElementsByName("negative");
+            var pos_checks = document.getElementsByName("positive");
+            for(let i in  neg_checks){
+                if(neg_checks[i].checked){
+                    component_indexes.push(neg_checks[i].labels[0].getAttribute("data-c-index"));
+                }
+            }
+            for(let i in  pos_checks){
+                if(pos_checks[i].checked){
+                    component_indexes.push(pos_checks[i].labels[0].getAttribute("data-c-index"));
+                }
+            }
+
+            // 0 components overlay
+            if(component_indexes.length == 0){
+                plot_area.style.backgroundColor = "var(--dark)";
+                plot_area.style.opacity = 0;
+                var new_icon = document.createElement("span");
+                new_icon.className = "fas fa-long-arrow-alt-left"
+                new_icon.style.fontSize = "3em";
+                new_icon.style.position = "absolute";
+                new_icon.style.color = "var(--white)";
+                new_icon.style.left = "45%";
+                new_icon.style.top = "30%";
+                var new_display = document.createElement("p");
+                new_display.className = "text-center";
+                new_display.innerHTML = "Select at Least One Component to View a Box Plot";
+                new_display.style.position = "absolute";
+                new_display.style.left = "50%";
+                new_display.style.top = "50%";
+                new_display.style.transform = "translate(-50%, -50%)";
+                new_display.style.color = "white";
+                plot_area.append(new_icon);
+                new_display.style.opacity = 1;
+                plot_area.append(new_display);
+                var t = d3.transition().duration(1500);
+                d3.select("#plot_chart").transition(t).style("opacity", 0.5);
+                return;
+            }
+            else{ 
+                plot_area.style.backgroundColor = "inherit";
+            }
+
+            // get y-axis extents (or cap)
+            var y_max = -Infinity;
+            var y_min = Infinity;
+            for(let i in machine_data.components){
+                if(component_indexes.includes(i)){
+                    var new_values = machine_data.components[i]["lcms_metrics"][display_metric].values;
+                    var new_min = d3.min(new_values);
+                    var new_max = d3.max(new_values);
+                    if(new_max > y_max){
+                        y_max = new_max;
+                    }
+                    if(new_min < y_min){
+                        y_min = new_min;
+                    }
+                }
+            }
+
+            // set the dimensions and margins of the plot
+            var margin = {top: 5, right: 10, bottom: 40, left: 50};
+            var width = plot_width - margin.left - margin.right;
+            var height = plot_height - margin.top - margin.bottom;
+
+            // append the svg object to the plot area
+            var svg = d3.select("#plot_chart")
+            .append("svg")
+                .attr("width", plot_width)
+                .attr("height", plot_height)
+            .append("g")
+                .attr("transform",
+                    "translate(" + margin.left + "," + margin.top + ")");
+
+            // create colour scale
+            var colourScale = d3.scaleSequential()
+                .interpolator(d3.interpolateInferno)
+                .domain([y_min,y_max])
+
+            // scale for values (or IQR)
+            var yScale = d3.scaleLinear()
+            .domain([y_min, y_max])
+            .range([0, width]);
+
+            // legend
+             
+
+
+            if(transition){
+                d3.select("#plot_chart").transition().duration(500).style("opacity", 1);
+            }
+        }
+
+        function create_metric_menu(transition){
+            // get container
+            var metric_menu_div = document.getElementById("menu");
+
+            // remove any elements
+            while (metric_menu_div.firstChild) {
+                metric_menu_div.removeChild(metric_menu_div.firstChild);
+            }
+
+            // div for content
+            var metric_menu_inner = document.createElement("div");
+            metric_menu_inner.style.position = "absolute";
+            metric_menu_inner.style.left = "2.5%";
+            metric_menu_inner.style.top = "2.5%"; 
+            metric_menu_inner.style.width = "95%";
+            metric_menu_inner.style.height = "95%";
+            metric_menu_inner.style.fontSize = "1rem";
+            metric_menu_inner.style.opacity = 0;
+            metric_menu_inner.id = "metric_menu_inner";
+            metric_menu_inner.addEventListener("click", radioUpdate);
+
+            // LC-MS title
+            var new_title = document.createElement("p");
+            new_title.style.letterSpacing = "4px";
+            new_title.style.fontSize = "0.6em";
+            new_title.style.color = "var(--white)";
+            new_title.style.backgroundColor = "var(--dark)";
+            new_title.className = "text-center";
+            new_title.innerHTML = "LC-MS METRICS";
+            metric_menu_inner.append(new_title);
+
+            /* radio buttons for metrics*/
+            for(let i in machine_data.lcms_metrics){
+
+                // obj convert to display names from summary
+                let metrics_obj_metab = {
+                    "mass_error_ppm_Neg" :"Mass Error (ppm)",
+                    "mass_error_ppm_Pos" :"Mass Error (ppm))",
+                    "rt": "Retention Time",
+                    "area_normalised": "Area (normalised)"
+                }
+
+                // get display names
+                var breach_metrics = Object.keys(machine_data.run_data[run_index].summary);
+                breach_metrics = breach_metrics.map(function(metric){
+                    return metrics_obj_metab[metric];
+                })
+               
+                // create radio button and label
+                var new_div = document.createElement("div");
+                new_div.className = "text-center";
+                var new_label = document.createElement("label");
+                new_label.className = "radio form-check-label text-center";
+                new_label.innerHTML = machine_data.lcms_metrics[i].display_name.replace("_", " ");
+                var new_input = document.createElement("input");
+                new_input.setAttribute("type", "radio");
+                new_input.setAttribute("name", "radioOptions");
+                new_input.className = "radio-box";
+
+        
+                // add breach marker
+                if(breach_metrics.includes(machine_data.lcms_metrics[i].display_name)){
+                   var new_marker = document.createElement("span");
+                   new_marker.style.padding = 0;
+                   new_marker.style.position = "absolute";
+                   new_marker.style.right = 0;
+                   new_marker.style.top = 0;
+                   new_marker.style.opacity = 0;
+                   new_marker.style.fontSize = "1.5em";
+                   new_marker.className = "fas fa-times text-danger new_icon";
+                   new_label.append(new_marker);
+                }
+
+                new_label.append(new_input);
+                new_div.append(new_label);
+
+                metric_menu_inner.append(new_div);
+            };
+
+            // Pressure metrics for thermo machines
+            if(machine_data.machine_details.machine_type == "thermo"){
+                // Pressure Metric title
+                var new_title = document.createElement("p");
+                new_title.style.letterSpacing = "4px";
+                new_title.style.fontSize = "0.6em";
+                new_title.style.color = "var(--white)";
+                new_title.style.backgroundColor = "var(--dark)";
+                new_title.className = "text-center";
+                new_title.innerHTML = "PRESSURE METRICS";
+                metric_menu_inner.append(new_title);
+
+                for(metric in machine_data.pressure_metrics){
+                    // create radio button and label
+                    var new_div = document.createElement("div");
+                    new_div.className = "text-center";
+                    var new_label = document.createElement("label");
+                    new_label.className = "radio form-check-label text-center";
+                    new_label.innerHTML = machine_data.pressure_metrics[metric].display_name;
+                    var new_input = document.createElement("input");
+                    new_input.setAttribute("type", "radio");
+                    new_input.setAttribute("name", "radioOptions");
+                    new_input.className = "radio-box pressure";
+
+                    new_label.append(new_input);
+                    new_div.append(new_label);
+                    metric_menu_inner.append(new_div);
+                }
+            }
+
+            metric_menu_div.append(metric_menu_inner);
+
+            // check the display metric radio button
+            var radios = document.getElementsByName("radioOptions");
+            for(let i =0; i<radios.length; i++){
+                // match name to display_name from DB (watch this), could use obj
+                // come from summary page without (), test all metrics with proteomics
+                var menu_metric = radios[i].labels[0].innerText.replace(")", "").replace("(", "").toUpperCase(); 
+                // disable normalised if box
+                if(chart_type == "box"){
+                    if(menu_metric == "AREA NORMALISED" || menu_metric == "HEIGHT NORMALISED"){
+                        radios[i].disabled = true;
+                    }
+                }
+                if(menu_metric == display_metric.replace(")", "").replace("(", "").toUpperCase()){
+                    radios[i].checked = true;
+                }
+            }
+
+            // transition on load
+            var t = d3.transition().duration(1500);
+            if(transition){
+                // transition any new icons
+                d3.selectAll(".new_icon").transition(t).style("opacity", 1);
+                d3.select("#metric_menu_inner").transition(t).style("opacity", 1);
+            }
+            else{
+                document.getElementById("metric_menu_inner").style.opacity =1;
+                // transition any new icons
+                d3.selectAll(".new_icon").transition(t).style("opacity", 1);
+            }
+        }
+
+        function draw_box_plot(transition){
+            // get width and height of plot area
+            var plot_area = document.getElementById("plot_chart");
+            var chart_header = document.getElementById("chart_header");
+            var chart_bottom = document.getElementById("chart_bottom");
+            var plot_height = plot_area.offsetHeight;
+            var plot_width = plot_area.offsetWidth;
+
+            // remove any elements in plot area
+            while (plot_area.firstChild) {
+                plot_area.removeChild(plot_area.firstChild);
+            }
+            
+            if(transition){
+                plot_area.style.opacity = 0;
+                chart_header.innerHTML = display_metric.toUpperCase();
+            }
+
+            // get indexes of checked components
+            var component_indexes = [];
+            var neg_checks = document.getElementsByName("negative");
+            var pos_checks = document.getElementsByName("positive");
+            for(let i in  neg_checks){
+                if(neg_checks[i].checked){
+                    component_indexes.push(neg_checks[i].labels[0].getAttribute("data-c-index"));
+                }
+            }
+            for(let i in  pos_checks){
+                if(pos_checks[i].checked){
+                    component_indexes.push(pos_checks[i].labels[0].getAttribute("data-c-index"));
+                }
+            }
+
+            // 0 components overlay
+            if(component_indexes.length == 0){
+                plot_area.style.backgroundColor = "var(--dark)";
+                plot_area.style.opacity = 0;
+                var new_icon = document.createElement("span");
+                new_icon.className = "fas fa-long-arrow-alt-left"
+                new_icon.style.fontSize = "3em";
+                new_icon.style.position = "absolute";
+                new_icon.style.color = "var(--white)";
+                new_icon.style.left = "45%";
+                new_icon.style.top = "30%";
+                var new_display = document.createElement("p");
+                new_display.className = "text-center";
+                new_display.innerHTML = "Select at Least One Component to View a Box Plot";
+                new_display.style.position = "absolute";
+                new_display.style.left = "50%";
+                new_display.style.top = "50%";
+                new_display.style.transform = "translate(-50%, -50%)";
+                new_display.style.color = "white";
+                plot_area.append(new_icon);
+                new_display.style.opacity = 1;
+                plot_area.append(new_display);
+                var t = d3.transition().duration(1500);
+                d3.select("#plot_chart").transition(t).style("opacity", 0.5);
+                return;
+            }
+            else{ 
+                plot_area.style.backgroundColor = "inherit";
+            }
+
+            // get y-axis extents and data
+            var y_max = -Infinity;
+            var y_min = Infinity;
+            var IQR = -Infinity;
+            var all_boxes = [];
+            for(let i in machine_data.components){
+                if(component_indexes.includes(i)){
+                    var new_obj = machine_data.components[i].stats[display_metric];
+                    new_obj["mode"] = machine_data.components[i].component_mode;
+                    new_obj["index"] = parseInt(i);
+                    new_obj["colour"] = machine_data.components[i].colour;
+                    new_obj["name"] = machine_data.components[i].component_name.replace("_", " ");
+                    new_obj["current"] = machine_data.components[i].lcms_metrics[display_metric].values[run_index];
+                    new_obj["missing"] = machine_data.components[i].lcms_metrics[display_metric].missing;
+                    // y range
+                    if(new_obj["25_percent"] < y_min){
+                        y_min = new_obj["25_percent"];
+                    }
+                    if(new_obj["75_percent"] > y_max){
+                        y_max = new_obj["75_percent"];
+                    }
+                    // IQR
+                    if((new_obj["75_percent"] - new_obj["25_percent"]) > IQR){
+                        IQR = new_obj["75_percent"] - new_obj["25_percent"]; 
+                    }
+                    all_boxes.push(new_obj); 
+                }
+            }
+
+            // set the dimensions and margins of the plot
+            var margin = {top: 10, right: 10, bottom: 20, left: 50};
+            var width = plot_width - margin.left - margin.right;
+            
+            // boxwidth
+            var box_padding = 10;
+            if(component_indexes.length > 3){
+                var box_width = (width - (box_padding*(component_indexes.length)+ box_padding))/component_indexes.length;
+            }
+            else{
+                var box_width = width/4;
+            }
+            box_area_height = plot_height - margin.top - margin.bottom;
+            
+            // sort median desc
+            all_boxes.sort((a, b) => a["50_percent"] < b["50_percent"]) ;
+        
+            // sort polarity (pos first)
+            all_boxes.sort((a, b) => a["mode"] < b["mode"]) ;
+
+            // names for x scale
+            var names = all_boxes.map(function(obj){
+                return obj.name;
+            });
+
+            // append the svg object to the plot area
+            var svg = d3.select("#plot_chart")
+            .append("svg")
+                .attr("width", plot_width)
+                .attr("height", plot_height)
+            .append("g")
+                .attr("transform",
+                    "translate(" + margin.left + "," + margin.top + ")");
+
+            // x scale
+            xScale_box = d3.scaleBand()
+                .range([0, width])
+                .domain(names)
+                .paddingInner(1)  // between
+                .paddingOuter(0.5); // before and after
+
+            // x-axis 
+            var x_axis = d3.axisBottom().scale(xScale_box).tickValues([]).tickSizeOuter(0);
+
+            // x-axis-call
+            var x_axis_call = svg.append("g")
+            .attr("transform", "translate(0," + box_area_height + ")")
+            .attr("class", "axis-chart")
+            .call(x_axis);// x scale
+            xScale_box = d3.scaleBand()
+                .range([0, width])
+                .domain(names)
+                .paddingInner(1)  // between
+                .paddingOuter(0.5); // before and after
+
+            // x-axis 
+            var x_axis = d3.axisBottom().scale(xScale_box).tickValues([]).tickSizeOuter(0);
+
+            // x-axis-call
+            var x_axis_call = svg.append("g")
+            .attr("transform", "translate(0," + box_area_height + ")")
+            .attr("class", "axis-chart")
+            .call(x_axis);      
+
+            // y-scale
+            // set at outlier limit
+            //var IQR = y_max - y_min;
+            y_min = y_min - IQR;
+            y_max = y_max + IQR;
+            // no less than zero for time metrics
+            if(display_metric != "Mass Error (ppm)" && display_metric != "Mass Error (mDa)"){
+                if(y_min < 0){
+                    y_min = 0;
+                }
+            }
+            
+            if(yScale_box == null){
+                yScale_box = d3.scaleLinear()
+                    .domain([y_min , y_max])
+                    .range([box_area_height, 0]);
+            }
+
+            // y-axis
+            var y_axis = d3.axisLeft().scale(yScale_box)
+            .tickSize(2).tickSizeOuter(0);
+            
+            // y-axis calls
+            var y_axis_call = svg.append("g")
+                .attr("class", "axis-chart")
+                .call(y_axis);
+            
+            // grid y
+            var yAxisGrid = d3.axisLeft().scale(yScale_box).
+            tickSize(-width).tickFormat('').tickSizeOuter(0);
+
+            // grid y call
+            var y_axis_grid_call = svg.append("g")
+            .attr('class', 'axis-grid')
+            .call(yAxisGrid);
+
+            // ylabel
+            svg.append("text")
+            .attr("transform", "rotate(-90)")
+            .attr("class", "label")
+            .attr("y", 5 - margin.left)
+            .attr("x",0 - (box_area_height / 2))
+            .attr("dy", "1em")
+            .style("text-anchor", "middle")
+            .text(y_labels[display_metric].toUpperCase());
+
+            // optimal line
+            var optimals = ["Mass Error (ppm)", "Mass Error (mDa)", "Tailing", "Asymmetry"];
+            if(optimals.includes(display_metric)){
+                if(display_metric == "Mass Error (ppm)" || display_metric == "Mass Error (mDa)"){
+                    var marker = 0;
+                }
+                else{
+                    var marker = 1;
+                }
+                svg
+                .append("line")
+                .attr("id", "optimal_marker")
+                .attr("x1", 0)
+                .attr("y1", yScale_box(marker))
+                .attr("x2", width)
+                .attr("y2", yScale_box(marker))
+                .attr("stroke", "var(--dark)")
+                .attr("stroke-width", 2)
+                ;
+            }
+
+            // add the boxes
+            svg
+            .selectAll("boxes")
+            .data(all_boxes)
+            .enter()
+            .append("rect")
+                .attr("x", function(d){return(xScale_box(d.name)- box_width/2)})
+                .attr("y", function(d){return(yScale_box(d["75_percent"]))})
+                .attr("height", function(d){return(yScale_box(d["25_percent"])-yScale_box(d["75_percent"]))})
+                .attr("width", box_width)
+                .attr("stroke", function(d){return(d.colour)})
+                .attr("stroke-width", "2px")
+                .style("fill", function(d){return(d.colour)})
+                .style("fill-opacity", 1)
+                .attr("id", function(d, i){return "rect"+d.index})
+                .on("mouseover", function(event, d){
+                    // tooltip
+                    var tooltip = d3.select("#tooltip");
+                    var tooltipHTML = "<strong>" + d.name + "</strong><br>" +
+                                    "<strong>Q1 </strong>" + d["25_percent"].toFixed(3) + "<br>" +
+                                    "<strong>Q3 </strong>" + d["75_percent"].toFixed(3) + "<br>" +
+                                    "<strong>Median </strong>" + d["50_percent"].toFixed(3) + "<br>" +
+                                    "<strong>Mean </strong>" + d["mean"].toFixed(3);
+                                        
+                    tooltip.html(tooltipHTML);
+                    tooltip.style('left', (event.pageX+30) + 'px');
+                    tooltip.style('top', (event.pageY+10) + 'px');
+                    tooltip.style("visibility", "visible");
+                    // highlight
+                    d3.selectAll("rect").style("opacity", 0.1);
+                    d3.select("#rect"+d.index).style("opacity", 1);
+                    d3.selectAll("circle").style("opacity", 0);
+                    d3.selectAll("#circle"+d.index).style("opacity", 1);
+                    d3.selectAll(".boxline").style("opacity", 0.1);
+                    d3.selectAll(".boxline"+d.index).style("opacity", 1);
+                    d3.selectAll(".extender").style("opacity", 0.1);
+                    d3.selectAll(".extender"+d.index).style("opacity", 1);
+                })
+                .on("mouseout", function(event, d){
+                    var tooltip = d3.select("#tooltip");
+                    tooltip.style("visibility", "hidden");
+                    d3.selectAll("rect").style("opacity", 1);
+                    d3.selectAll("circle").style("opacity", 1);
+                    d3.selectAll(".boxline").style("opacity", 1);
+                    d3.selectAll(".extender").style("opacity", 1);
+                });
+
+            // medians
+            svg
+            .selectAll("medianLines")
+            .data(all_boxes)
+            .enter()
+            .append("line")
+            .attr("x1", function(d){return(xScale_box(d.name)-box_width/2) })
+            .attr("x2", function(d){return(xScale_box(d.name)+box_width/2) })
+            .attr("y1", function(d){return(yScale_box(d["50_percent"]))})
+            .attr("y2", function(d){return(yScale_box(d["50_percent"]))})
+            .attr("stroke", "white")
+            .attr("class", function(d){return "boxline boxline" + d.index});
+
+             // means
+             svg
+            .selectAll("meanLines")
+            .data(all_boxes)
+            .enter()
+            .append("line")
+            .attr("x1", function(d){return(xScale_box(d.name)-box_width/2) })
+            .attr("x2", function(d){return(xScale_box(d.name)+box_width/2) })
+            .attr("y1", function(d){return(yScale_box(d["mean"]))})
+            .attr("y2", function(d){return(yScale_box(d["mean"]))})
+            .attr("stroke", "white")
+            .attr("class", function(d){return "boxline boxline" + d.index})
+            .style("stroke-dasharray", ("3, 3"));
+
+            // current run
+            svg
+            .selectAll("currentRun")
+            .data(all_boxes)
+            .enter()
+            .append("circle")
+            .attr("cx", d => xScale_box(d.name))
+            .attr("cy", function(d){
+                    // cap so does not go off chart
+                    if(yScale_box(d.current) > box_area_height){
+                        return  box_area_height;
+                    }
+                    if(yScale_box(d.current)<0){
+                        return 0;
+                    }
+                    
+                    return yScale_box(d.current)
+                })
+            .attr("r", box_radius)
+            .attr("x", function(d, i) {return xScale_box(d.name)})
+            .attr("y", function(d){
+                    // cap so does not go off chart
+                    if(yScale_box(d.current) > box_area_height){
+                        return  box_area_height;
+                    }
+                    if(yScale_box(d.current)<0){
+                        return 0;
+                    }
+                    
+                    return yScale_box(d.current)
+                })
+            .attr("stroke", function(d, i) {return d.colour})
+            .attr("stroke-width", 2)
+            .attr("class","point")
+            .attr("id",  function(d, i) {return "circle" + d.index})
+            .attr("fill", function(d,j){
+                var miss = d.missing;
+                if(miss.includes(run_index)){
+                    return "black";
+                }
+                else if(yScale_box(d.current) > box_area_height){
+                        return  d.colour;
+                    }
+                else if(yScale_box(d.current)<0){
+                    return d.colour;
+                }
+                else{
+                    return "whitesmoke";
+                }
+            })
+            .on("mouseover", function(event, d){ // tooltip on hover
+
+                var tooltip = d3.select("#tooltip");
+                var miss = d.missing;
+                if(miss.includes(run_index)){
+                    var tooltipHTML = "<strong>" + d.name.replace("_", " ") + 
+                                    "</strong><br>" + machine_data.run_data[run_index].date_time.toDateString() + "<br>" +
+                                        get_time(machine_data.run_data[run_index].date_time) +  "<br><strong>" +
+                                        "NO VALUE" + "</strong>";
+                } else{
+                    var tooltipHTML = "<strong>" +  d.name.replace("_", " ")  + 
+                                    "</strong><br>" + machine_data.run_data[run_index].date_time.toDateString() + "<br>" +
+                                        get_time(machine_data.run_data[run_index].date_time) +  "<br><strong>" +
+                                        Number.parseFloat(d.current).toFixed(3) + "</strong>";
+                }
+                tooltip.html(tooltipHTML);
+                tooltip.style('left', (event.pageX+30) + 'px');
+                tooltip.style('top', (event.pageY+10) + 'px');
+                tooltip.style("visibility", "visible");
+
+                // highlight
+                d3.selectAll("rect").style("opacity", 0.1);
+                d3.select("#rect"+d.index).style("opacity", 1);
+                d3.selectAll("circle").style("opacity", 0);
+                d3.selectAll("#circle"+d.index).style("opacity", 1);
+                d3.selectAll(".boxline").style("opacity", 0.1);
+                d3.selectAll(".boxline"+d.index).style("opacity", 1);
+                d3.selectAll(".extender").style("opacity", 0.1);
+                d3.selectAll(".extender"+d.index).style("opacity", 1);
+
+            })
+            .on("mouseout", function(){
+                var tooltip = d3.select("#tooltip");
+                tooltip.style("visibility", "hidden");
+                d3.selectAll("rect").style("opacity", 1);
+                d3.selectAll("circle").style("opacity", 1);
+                d3.selectAll(".boxline").style("opacity", 1);
+                d3.selectAll(".extender").style("opacity", 1);
+            })
+
+            // extenders
+            svg
+            .selectAll("extenders")
+            .data(all_boxes)
+            .enter()
+            .append("line")
+            .attr("x1", function(d){return(xScale_box(d.name))})
+            .attr("x2", function(d){return(xScale_box(d.name))})
+            .attr("y1", function(d){
+                var y1;
+                if(d.current >= d["75_percent"]){
+                    y1 = yScale_box(d.current);
+                }
+                else if(d.current <= d["25_percent"]){
+                    y1 = yScale_box(d["25_percent"]);
+                }
+                else{
+                    y1 =  yScale_box(d.current);
+                }
+
+                // cap so does not go off chart
+                if(y1 < 0){
+                    return 0;
+                }
+                return y1;
+            })
+            .attr("y2", function(d){
+                var y2;
+                if(d.current >= d["75_percent"]){
+                    y2 = yScale_box(d["75_percent"]);
+                }
+                else if(d.current <= d["25_percent"]){
+                    y2 = yScale_box(d.current);
+                }
+                else{
+                    y2 = yScale_box(d.current);
+                }
+                // cap so does not go off chart
+                if(y2 > box_area_height){
+                    return box_area_height;
+                }
+                return y2;
+            })
+            .attr("stroke", function(d){return d.colour})
+            .attr("stroke-width", 2)
+            .attr("class", function(d){return "extender extender" + d.index});
+            
+            if(transition){
+                d3.select("#plot_chart").transition().duration(500).style("opacity", 1);
+            }
+            
+        }
+
+        function draw_line_chart(update){ // remove update??
+            // get width and height of plot area
+            var plot_area = document.getElementById("plot_chart");
+            var chart_header = document.getElementById("chart_header");
+            var chart_bottom = document.getElementById("chart_bottom");
+            var plot_height = plot_area.offsetHeight;
+            var plot_width = plot_area.offsetWidth;
+
+            // set the dimensions and margins of the plot
+            var margin = {top: 5, right: 10, bottom: 40, left: 50};
+            var width = plot_width - margin.left - margin.right;
+            var height = plot_height - margin.top - margin.bottom;
+
+            
+            // remove any elements in plot area
+            while (plot_area.firstChild) {
+                plot_area.removeChild(plot_area.firstChild);
+            }
+
+            plot_area.style.opacity = 0;
+            chart_header.innerHTML = display_metric.toUpperCase();
+
+            // get indexes of checked components
+            var component_indexes = [];
+            var neg_checks = document.getElementsByName("negative");
+            var pos_checks = document.getElementsByName("positive");
+            for(let i in  neg_checks){
+                if(neg_checks[i].checked){
+                    component_indexes.push(neg_checks[i].labels[0].getAttribute("data-c-index"));
+                }
+            }
+            for(let i in  pos_checks){
+                if(pos_checks[i].checked){
+                    component_indexes.push(pos_checks[i].labels[0].getAttribute("data-c-index"));
+                }
+            }
+            
+            // 0 components overlay
+            if(component_indexes.length == 0){
+                plot_area.style.backgroundColor = "var(--dark)";
+                plot_area.style.opacity = 0;
+                var new_icon = document.createElement("span");
+                new_icon.className = "fas fa-long-arrow-alt-left"
+                new_icon.style.fontSize = "3em";
+                new_icon.style.position = "absolute";
+                new_icon.style.color = "var(--white)";
+                new_icon.style.left = "45%";
+                new_icon.style.top = "30%";
+                var new_display = document.createElement("p");
+                new_display.className = "text-center";
+                new_display.innerHTML = "Select at Least One Component to View a Line Chart";
+                new_display.style.position = "absolute";
+                new_display.style.left = "50%";
+                new_display.style.top = "50%";
+                new_display.style.transform = "translate(-50%, -50%)";
+                new_display.style.color = "white";
+                plot_area.append(new_icon);
+                new_display.style.opacity = 1;
+                plot_area.append(new_display);
+                var t = d3.transition().duration(1500);
+                d3.select("#plot_chart").transition(t).style("opacity", 0.5);
+                return;
+            }
+            else{ 
+                plot_area.style.backgroundColor = "inherit";
+            }
+
+            // get y-axis extents (or cap)
+            var y_max = -Infinity;
+            var y_min = Infinity;
+            for(let i in machine_data.components){
+                if(component_indexes.includes(i)){
+                    var new_values = machine_data.components[i]["lcms_metrics"][display_metric].values;
+                    var new_min = d3.min(new_values);
+                    var new_max = d3.max(new_values);
+                    if(new_max > y_max){
+                        y_max = new_max;
+                    }
+                    if(new_min < y_min){
+                        y_min = new_min;
+                    }
+                }
+            }
+
+            // x values
+            var run_values = machine_data.run_data
+            var x_values = [];
+            for(let run in run_values){
+                x_values.push(run_values[run].date_time);
+            }
+
+            // append the svg object to the plot area
+            var svg = d3.select("#plot_chart")
+            .append("svg")
+                .attr("width", plot_width)
+                .attr("height", plot_height)
+            .append("g")
+                .attr("transform",
+                    "translate(" + margin.left + "," + margin.top + ")");
+
+            // radius and line-width scale for zoom
+            var minR = 3;
+            var maxR = 7;
+            var minL = 2;
+            var maxL = 3;
+            var lowX = machine_data.run_data[machine_data.run_data.length-1].date_time;
+            var hiX = machine_data.run_data[0].date_time;
+            var maxX = hiX - lowX;
+            var radiusScale = d3.scaleLinear()
+                .domain([0, maxX])
+                .range([maxR, minR]);
+            var lineScale = d3.scaleLinear()
+                .domain([0, maxX])
+                .range([maxL, minL]);
+
+            // y-scale
+            var offsetY = (2*radius/height)*(y_max-y_min);
+            // x scale
+            // allow for circles (on full view)
+            var offsetX = (2*radius/width)*(d3.max(x_values)-d3.min(x_values));
+            var minX = new Date(d3.min(x_values) - offsetX);
+            var maxX = new Date(+d3.max(x_values) + offsetX); // + needed as hint else it will concatenate
+
+            // store/use yScale/xScale
+            for(let i in machine_data.lcms_metrics){
+                if(machine_data.lcms_metrics[i].display_name == display_metric){
+                    // store and set yScale
+                    if(machine_data.lcms_metrics[i].yScale == null){
+                        yScale_chart = d3.scaleLinear()
+                        .domain([y_min - offsetY, y_max + offsetY])
+                        .range([height, 0]);
+                        machine_data.lcms_metrics[i].yScale = yScale_chart;
+                    }
+                    else{
+                        yScale_chart = machine_data.lcms_metrics[i].yScale;
+                    }
+                    // store and sey xScale
+                    if(machine_data.lcms_metrics[i].xScale == null){
+                        xScale_chart = d3.scaleTime()
+                        .domain([minX, maxX])
+                        .range([0, width]);
+                        machine_data.lcms_metrics[i].xScale = xScale_chart;
+                    }
+                    else{
+                        xScale_chart = machine_data.lcms_metrics[i].xScale;
+                    }
+                    // set radius
+                    if(machine_data.lcms_metrics[i].radius !== null){
+                        radius = machine_data.lcms_metrics[i].radius;
+                    }
+                    else{
+                        radius = base_radius;
+                    }
+                    // set lineWidth
+                    if(machine_data.lcms_metrics[i].lineWidth !== null){
+                        lineWidth = machine_data.lcms_metrics[i].lineWidth;
+                    }
+                    else{
+                        lineWidth = base_line_width;
+                    }
+                    break;
+                }
+            }
+
+            // x-axis 
+            var x_axis = d3.axisBottom().scale(xScale_chart).tickSize(2).ticks(5).tickSizeOuter(0);
+
+            // x-axis call (store for zoom)
+            var x_axis_call = svg.append("g")
+            .attr("transform", "translate(0," + height + ")")
+            .attr("class", "axis-chart")
+            .call(x_axis); // svg (0.0) is top left
+
+            // grid x 
+            var xAxisGrid = d3.axisBottom().scale(xScale_chart)
+            .tickSize(-height).tickFormat('').ticks(5).tickSizeOuter(0);
+
+            // grid call x
+            var x_axis_grid_call = svg.append("g")
+            .attr('class', 'axis-grid')
+            .attr('transform', 'translate(0,' + height + ')')
+            .call(xAxisGrid);
+
+            // y-axis
+            var y_axis = d3.axisLeft().ticks(5).scale(yScale_chart)
+            .tickSize(2).tickSizeOuter(0);
+
+            // y-axis calls
+            var y_axis_call = svg.append("g")
+                .attr("class", "axis-chart")
+                .call(y_axis);
+            
+            // grid y
+            var yAxisGrid = d3.axisLeft().scale(yScale_chart).
+            tickSize(-width).tickFormat('').ticks(5).tickSizeOuter(0);
+
+            // grid y call
+            var y_axis_grid_call = svg.append("g")
+            .attr('class', 'axis-grid')
+            .call(yAxisGrid);
+
+            // ylabel
+            svg.append("text")
+            .attr("transform", "rotate(-90)")
+            .attr("class", "label")
+            .attr("y", 5 - margin.left)
+            .attr("x",0 - (height / 2))
+            .attr("dy", "1em")
+            .style("text-anchor", "middle")
+            .text(y_labels[display_metric].toUpperCase());
+
+            
+            /*ZOOM*/
+            // Add a clipPath: everything out of this area won't be drawn.
+            var clip = svg.append("defs").append("svg:clipPath")
+                .attr("id", "clip3") // don't use same id in other charts
+                .append("svg:rect")
+                .attr("width", width)
+                .attr("height", height)
+                .attr("x",0)
+                .attr("y",0);
+
+            // brushing
+            var brush = d3.brush()                   
+                .extent([[0,0], [width,height]]) 
+                .on("end", updateZoom);
+            
+            
+            // add each line 
+            var all_lines = svg.append('g')
+                .attr("clip-path", "url(#clip3)")
+                .attr("id", "all_lines");
+            
+            // curved line
+            line = d3.line().curve(d3.curveMonotoneX)
+                                    .x(function(d, i) {return xScale_chart(d.x)})
+                                        .y(function(d, i) {return yScale_chart(d.y)});
+            
+            // add threshold markers
+            var thresholds = getThresholds();
+            var overlay = false;
+            if(Object.keys(thresholds).length > 0){
+                overlay = true;
+                // lower thresh
+                if(thresholds.threshold_low != ""){
+                    all_lines.append("line")
+                    .attr("id", "thresh_low")
+                    .attr("x1", xScale_chart(d3.min(x_values)))
+                    .attr("y1", yScale_chart(thresholds.threshold_low))
+                    .attr("x2", xScale_chart(d3.max(x_values)))
+                    .attr("y2", yScale_chart(thresholds.threshold_low))
+                    .attr("stroke", "grey")
+                    .attr("stroke-width", lineWidth - 1)
+                    .style("stroke-dasharray", ("5, 5, 5, 5, 5, 5, 10, 5, 10, 5, 10, 5"));
+                }
+                else{
+                    thresholds.threshold_low = 0;
+                }
+
+                // upper thresh
+                if(thresholds.threshold_high != ""){
+                    all_lines.append("line")
+                    .attr("id", "thresh_high")
+                    .attr("x1", xScale_chart(d3.min(x_values)))
+                    .attr("y1", yScale_chart(thresholds.threshold_high))
+                    .attr("x2", xScale_chart(d3.max(x_values)))
+                    .attr("y2", yScale_chart(thresholds.threshold_high))
+                    .attr("stroke", "grey")
+                    .attr("stroke-width", lineWidth - 1)
+                    .style("stroke-dasharray", ("5, 5, 5, 5, 5, 5, 10, 5, 10, 5, 10, 5"));
+                }
+                else{
+                    thresholds.threshold_high = height;
+                }
+
+                // rect overlay
+                all_lines.append("g")
+                .append("rect")
+                .attr("class", "overlay")
+                .attr("width", width)
+                .attr("height", yScale_chart(thresholds.threshold_low) - yScale_chart(thresholds.threshold_high))
+                .attr("x",0)
+                .attr("y",yScale_chart(thresholds.threshold_high))
+                .attr("fill", "var(--info)")
+                .style("opacity", 0.2);
+            }
+
+            // Add the brushing (first for line point hover events to work)
+            // https://github.com/d3/d3/issues/1604
+            all_lines
+            .append("g")
+                .attr("class", "brush")
+                .call(brush);
+
+            for(let i in machine_data.components){
+                if(component_indexes.includes(i)){
+                    var y_values = machine_data.components[i]["lcms_metrics"][display_metric].values;
+                    // convert to d3 friendly format
+                    var data = [];
+                    for(let i = 0; i<y_values.length; i++){
+                        let new_row = {'x': x_values[i], 'y': y_values[i], 'index': i};
+                        data.push(new_row);
+                    }
+
+                    // line
+                    all_lines.append("path")
+                    .datum(data)
+                    .attr("fill", "none")
+                    .attr("class", "chartline chartline"+i) // used to redraw for zoom
+                    .attr("stroke", machine_data.components[i].colour)
+                    .attr("stroke-width", lineWidth)
+                    .on("mouseover", function(event){ // highlight on hover
+
+                        // text location boundaries
+                        var x = event.layerX;
+                        var y = event.layerY;
+                        var anchor = "middle"; 
+                        if(x >= width -100){
+                            x = width - 200;
+                            anchor = "start";
+                        };
+                        if(x <= 150){
+                            x = x + 150;
+                        }
+                        if(y >= height -100){
+                            y = height - 100;
+                        }
+
+                        // highlight
+                        d3.selectAll(".chartline").style("opacity", 0.1);
+                        d3.select(this).style("opacity", 1);
+                        d3.selectAll(".point").style("opacity", 0);
+                        d3.selectAll(".point"+i).style("opacity", 1);
+
+                        // add text
+                        svg.append("text")
+                        .attr("class", "hover-text")
+                        .attr("x", x)
+                        .attr("y", y)
+                        .attr("dy", "1em")
+                        .attr("font-size", "1em")
+                        .style("text-anchor", anchor)
+                        .text(machine_data.components[i].component_name.replace("_", " "));
+                        
+                    })
+                    .on("mouseout", function(){
+                        d3.selectAll(".chartline").style("opacity", 1);
+                        d3.selectAll(".point").style("opacity", 1);
+                        d3.select(".hover-text").remove();
+                    })
+                    .attr("d", line);
+
+                    // points
+                    all_lines.append("g")
+                    .selectAll("circle")
+                    .data(data)
+                    .join("circle")
+                    .attr("cx", d => xScale_chart(d.x))
+                    .attr("cy", d => yScale_chart(d.y))
+                    .attr("r", radius)
+                    .attr("x", function(d, i) {return xScale_chart(d.x)})
+                    .attr("y", function(d, i) {return yScale_chart(d.y)})
+                    .attr("stroke", machine_data.components[i].colour)
+                    .attr("class","point point" + i)
+                    .attr("fill", function(d,j){
+                        var miss = machine_data.components[i].lcms_metrics[display_metric].missing;
+                        if(miss.includes(j)){
+                            return "var(--dark)";
+                        }else{
+                            return "white";
+                        } 
+                    })
+                    .on("mouseover", function(event, d){
+                        var tooltip = d3.select("#tooltip");
+                        var miss = machine_data.components[i].lcms_metrics[display_metric].missing;
+                        if(miss.includes(d.index)){
+                            var tooltipHTML = "<strong>" + machine_data.components[i].component_name.replace("_", " ") + 
+                                            "</strong><br>" + d.x.toDateString() + "<br>" +
+                                                get_time(d.x) +  "<br><strong>" +
+                                                "NO VALUE" + "</strong>";
+                        } else{
+                            var tooltipHTML = "<strong>" + machine_data.components[i].component_name.replace("_", " ") + 
+                                            "</strong><br>" + d.x.toDateString() + "<br>" +
+                                                get_time(d.x) +  "<br><strong>" +
+                                                Number.parseFloat(d.y).toFixed(3) + "</strong>";
+                        }
+                        tooltip.html(tooltipHTML);
+                        tooltip.style('left', (event.pageX+10) + 'px');
+                        tooltip.style('top', (event.pageY+10) + 'px');
+                        tooltip.style("visibility", "visible");
+
+                        // highlight line
+                        d3.selectAll(".chartline").style("opacity", 0.1);
+                        d3.selectAll(".chartline"+i).style("opacity", 1);
+                        d3.selectAll(".point").style("opacity", 0);
+                        d3.selectAll(".point"+i).style("opacity", 1);
+
+                    })
+                    .on("mouseout", function(){
+                        var tooltip = d3.select("#tooltip");
+                        tooltip.style("visibility", "hidden");
+                        d3.selectAll(".chartline").style("opacity", 1);
+                        d3.selectAll(".point").style("opacity", 1);
+                    });  
+                }
+            }
+            d3.select("#plot_chart").transition().duration(500).style("opacity", 1);
+            
+            // Function that updates the chart for given boundaries
+            // d3 passes the event to the function in v6 (not in v4)
+            function updateZoom(event) {
+                zoom = true;
+                
+                // What are the selected boundaries?
+                extent = event.selection;
+                
+                // If no selection just return
+                if(!extent){
+                    return;
+                }else{
+                    var x1 = xScale_chart.invert(extent[0][0]);
+                    var x2 = xScale_chart.invert(extent[1][0]);
+                    radius = radiusScale(x2-x1);
+                    lineWidth = lineScale(x2-x1);
+                   
+                    xScale_chart.domain([xScale_chart.invert(extent[0][0]), xScale_chart.invert(extent[1][0])])
+                    yScale_chart.domain([yScale_chart.invert(extent[1][1]), yScale_chart.invert(extent[0][1])])
+                    all_lines.select(".brush").call(brush.move, null) // This remove the grey brush area 
+                }
+                
+                // Update axis and line/point position etc
+                x_axis_call.transition().duration(1000).call(x_axis);
+                x_axis_grid_call.transition().duration(1000).call(xAxisGrid);
+                y_axis_call.transition().duration(1000).call(y_axis);
+                y_axis_grid_call.transition().duration(1000).call(yAxisGrid);
+                all_lines
+                    .selectAll('.chartline')
+                    .transition()
+                    .duration(1000)
+                    .attr("d", line)
+                    .attr("stroke-width", lineWidth);
+                all_lines
+                    .selectAll('circle')
+                    .transition()
+                    .duration(1000)
+                    .attr("cx", d => xScale_chart(d.x))
+                    .attr("cy", d => yScale_chart(d.y))
+                    .attr("r", radius);
+
+                if(overlay){
+                    all_lines
+                        .select(".overlay")
+                        .transition()
+                        .duration(1000)
+                        .attr("width", width)
+                        .attr("height", yScale_chart(thresholds.threshold_low) - yScale_chart(thresholds.threshold_high))
+                        .attr("x",0)
+                        .attr("y",yScale_chart(thresholds.threshold_high));
+                    all_lines
+                        .select("#thresh_low")
+                        .transition()
+                        .duration(1000)
+                        .attr("x1", xScale_chart(d3.min(x_values)))
+                        .attr("y1", yScale_chart(thresholds.threshold_low))
+                        .attr("x2", xScale_chart(d3.max(x_values)))
+                        .attr("y2", yScale_chart(thresholds.threshold_low))
+                        .attr("stroke-width", lineWidth - 1);
+                    all_lines
+                        .select("#thresh_high")
+                        .transition()
+                        .duration(1000)
+                        .attr("x1", xScale_chart(d3.min(x_values)))
+                        .attr("y1", yScale_chart(thresholds.threshold_high))
+                        .attr("x2", xScale_chart(d3.max(x_values)))
+                        .attr("y2", yScale_chart(thresholds.threshold_high))
+                        .attr("stroke-width", lineWidth -1);
+                }
+
+                // store yScale/xScale
+                for(let i in machine_data.lcms_metrics){
+                    if(machine_data.lcms_metrics[i].display_name == display_metric){
+                        machine_data.lcms_metrics[i].yScale = yScale_chart;  
+                        machine_data.lcms_metrics[i].xScale = xScale_chart;
+                        machine_data.lcms_metrics[i].radius = radius;
+                        machine_data.lcms_metrics[i].lineWidth = lineWidth;  
+                        break;
+                    }
+                } 
+            }
+
+            // If user double click, reinitialize the chart
+            svg.on("dblclick",function(){
+                zoom = false;
+                radius = base_radius;
+                lineWidth = base_line_width;
+                xScale_chart.domain([minX, maxX]);
+                yScale_chart.domain([y_min - offsetY, y_max + offsetY]);
+                x_axis_call.transition().duration(1000).call(x_axis);
+                x_axis_grid_call.transition().duration(1000).call(xAxisGrid);
+                y_axis_call.transition().duration(1000).call(y_axis);
+                y_axis_grid_call.transition().duration(1000).call(yAxisGrid);
+                all_lines
+                    .selectAll('.chartline')
+                    .transition()
+                    .duration(1000)
+                    .attr("d",line)
+                    .attr("stroke-width", lineWidth);
+                all_lines
+                    .selectAll('circle')
+                    .transition()
+                    .duration(1000)
+                    .attr("cx", d => xScale_chart(d.x))
+                    .attr("cy", d => yScale_chart(d.y))
+                    .attr("r", radius);
+                if(overlay){
+                    all_lines
+                        .select(".overlay")
+                        .transition()
+                        .duration(1000)
+                        .attr("width", width)
+                        .attr("height", yScale_chart(thresholds.threshold_low) - yScale_chart(thresholds.threshold_high))
+                        .attr("x",0)
+                        .attr("y",yScale_chart(thresholds.threshold_high));
+                    all_lines
+                        .select("#thresh_low")
+                        .transition()
+                        .duration(1000)
+                        .attr("x1", xScale_chart(d3.min(x_values)))
+                        .attr("y1", yScale_chart(thresholds.threshold_low))
+                        .attr("x2", xScale_chart(d3.max(x_values)))
+                        .attr("y2", yScale_chart(thresholds.threshold_low))
+                        .attr("stroke-width", lineWidth - 1);
+                    all_lines
+                        .select("#thresh_high")
+                        .transition()
+                        .duration(1000)
+                        .attr("x1", xScale_chart(d3.min(x_values)))
+                        .attr("y1", yScale_chart(thresholds.threshold_high))
+                        .attr("x2", xScale_chart(d3.max(x_values)))
+                        .attr("y2", yScale_chart(thresholds.threshold_high))
+                        .attr("stroke-width", lineWidth - 1);
+                }
+
+                // store yScale/xScale
+                for(let i in machine_data.lcms_metrics){
+                    if(machine_data.lcms_metrics[i].display_name == display_metric){
+                        machine_data.lcms_metrics[i].yScale = yScale_chart;
+                        machine_data.lcms_metrics[i].xScale = xScale_chart;  
+                        machine_data.lcms_metrics[i].radius = radius;
+                        machine_data.lcms_metrics[i].lineWidth = lineWidth;  
+                        break;
+                    }
+                }  
+            });
+            
+        }
+
+        function draw_pressure_line(transition){
+            // get width and height of plot area
+            var plot_area = document.getElementById("plot_chart");
+            var chart_header = document.getElementById("chart_header");
+            var chart_bottom = document.getElementById("chart_bottom");
+            var plot_height = plot_area.offsetHeight;
+            var plot_width = plot_area.offsetWidth;
+
+            // set the dimensions and margins of the plot
+            var margin = {top: 5, right: 10, bottom: 40, left: 50};
+            var width = plot_width - margin.left - margin.right;
+            var height = plot_height - margin.top - margin.bottom;
+
+            // remove any elements in plot area
+            while (plot_area.firstChild) {
+                plot_area.removeChild(plot_area.firstChild);
+            }
+
+            if(transition){
+                plot_area.style.opacity = 0;
+                chart_header.innerHTML = display_metric.toUpperCase();
+            }
+
+            // x values
+            var run_values = machine_data.run_data
+            var x_values = [];
+            for(let run in run_values){
+                x_values.push(run_values[run].date_time);
+            }
+
+            // y values and missing indexes
+            for(let i in machine_data.pressure_metrics){
+                if(machine_data.pressure_metrics[i].display_name == display_metric){
+                    var y_values = machine_data.pressure_metrics[i].values;
+                    var missing = machine_data.pressure_metrics[i].missing;
+                    break;
+                }
+            };
+
+            // append the svg object to the plot area
+            var svg = d3.select("#plot_chart")
+            .append("svg")
+                .attr("width", plot_width)
+                .attr("height", plot_height)
+            .append("g")
+                .attr("transform",
+                    "translate(" + margin.left + "," + margin.top + ")");
+
+            // radius and line-width scale for zoom
+            var minR = 3;
+            var maxR = 8;
+            var minL = 2;
+            var maxL = 4;
+            var lowX = machine_data.run_data[machine_data.run_data.length-1].date_time;
+            var hiX = machine_data.run_data[0].date_time;
+            var maxX = hiX - lowX;
+            let radiusScale = d3.scaleLinear()
+                .domain([0, maxX])
+                .range([maxR, minR]);
+            let lineScale = d3.scaleLinear()
+                .domain([0, maxX])
+                .range([maxL, minL]);
+
+            // x scale
+            var offsetX = (2*radius/width)*(d3.max(x_values)-d3.min(x_values));
+            var minX = new Date(d3.min(x_values) - offsetX);
+            var maxX = new Date(+d3.max(x_values) + offsetX); // + needed as hint else it will concatenate
+            // y-scale offset
+            var offsetY = (2*radius/height)*(d3.max(y_values)-d3.min(y_values));
+
+            // store/use yScale/xScale
+            for(let i in machine_data.pressure_metrics){
+                if(machine_data.pressure_metrics[i].display_name == display_metric){
+                    // store and set yScale
+                    if(machine_data.pressure_metrics[i].yScale == null){
+                        yScale = d3.scaleLinear()
+                        .domain([d3.min(y_values) - offsetY, d3.max(y_values) + offsetY])
+                        .range([height, 0]);
+                        machine_data.pressure_metrics[i].yScale = yScale;
+                    }
+                    else{
+                        yScale = machine_data.pressure_metrics[i].yScale;
+                    }
+                    // store and sey xScale
+                    if(machine_data.pressure_metrics[i].xScale == null){
+                        xScale_chart = d3.scaleTime()
+                        .domain([minX, maxX])
+                        .range([0, width]);
+                        machine_data.pressure_metrics[i].xScale = xScale_chart;
+                    }
+                    else{
+                        xScale_chart = machine_data.pressure_metrics[i].xScale;
+                    }
+                    // set radius
+                    if(machine_data.pressure_metrics[i].radius !== null){
+                        radius = machine_data.pressure_metrics[i].radius;
+                    }
+                    else{
+                        radius = base_radius;
+                    }
+                    // set lineWidth
+                    if(machine_data.pressure_metrics[i].lineWidth !== null){
+                        lineWidth = machine_data.pressure_metrics[i].lineWidth;
+                    }
+                    else{
+                        lineWidth = base_line_width;
+                    }
+                    break;
+                }
+            }
+
+            // x-axis 
+            var x_axis = d3.axisBottom().scale(xScale_chart).tickSize(2).ticks(5).tickSizeOuter(0);
+
+            // x-axis call (store for zoom)
+            var x_axis_call = svg.append("g")
+            .attr("transform", "translate(0," + height + ")")
+            .attr("class", "axis-chart")
+            .call(x_axis); // svg (0.0) is top left
+
+            // grid x 
+            var xAxisGrid = d3.axisBottom().scale(xScale_chart)
+            .tickSize(-height).tickFormat('').ticks(5).tickSizeOuter(0);
+
+            // grid call x
+            var x_axis_grid_call = svg.append("g")
+            .attr('class', 'axis-grid')
+            .attr('transform', 'translate(0,' + height + ')')
+            .call(xAxisGrid);
+
+            // y-axis
+            var y_axis = d3.axisLeft().ticks(5).scale(yScale)
+            .tickSize(2).tickSizeOuter(0);
+
+            // y-axis calls
+            var y_axis_call = svg.append("g")
+                .attr("class", "axis-chart")
+                .call(y_axis);
+            
+            // grid y
+            var yAxisGrid = d3.axisLeft().scale(yScale).
+            tickSize(-width).tickFormat('').ticks(5).tickSizeOuter(0);
+
+            // grid y call
+            var y_axis_grid_call = svg.append("g")
+            .attr('class', 'axis-grid')
+            .call(yAxisGrid);
+
+            // ylabel
+            svg.append("text")
+            .attr("transform", "rotate(-90)")
+            .attr("class", "label")
+            .attr("y", 5 - margin.left)
+            .attr("x",0 - (height / 2))
+            .attr("dy", "1em")
+            .style("text-anchor", "middle")
+            .text("BARS");
+
+            /*ZOOM*/
+            /*https://www.d3-graph-gallery.com/graph/line_brushZoom.html*/
+
+            // Add a clipPath: everything out of this area won't be drawn.
+            var clip = svg.append("defs").append("svg:clipPath")
+                .attr("id", "clip3") // don't use same id in other charts
+                .append("svg:rect")
+                .attr("width", width)
+                .attr("height", height)
+                .attr("x",0)
+                .attr("y",0);
+
+            // brushing
+            var brush = d3.brush()                   
+                .extent([[0,0], [width,height]])
+                .on("end", updateZoom);
+            
+            // add each line 
+            var all_lines = svg.append('g')
+                .attr("clip-path", "url(#clip3)")
+                .attr("id", "all_lines");
+            
+            // curved line
+            line = d3.line().curve(d3.curveMonotoneX)
+                                    .x(function(d, i) {return xScale_chart(d.x)})
+                                        .y(function(d, i) {return yScale(d.y)});
+
+            // add threshold markers here(none implemented)
+
+            // add brushing first
+            all_lines
+            .append("g")
+                .attr("class", "brush")
+                .call(brush);
+            
+            // convert to d3 friendly format
+            var data = [];
+            for(let i = 0; i<y_values.length; i++){
+                let new_row = {'x': x_values[i], 'y': y_values[i], 'index':i};
+                data.push(new_row);
+            }
+
+            // line
+            all_lines.append("path")
+            .datum(data)
+            .attr("fill", "none")
+            .attr("class", "chartline") // used to redraw for zoom
+            .attr("stroke", "var(--info)")
+            .attr("stroke-width", 2)
+            .attr("d", line);
+
+            // points
+            all_lines.append("g")
+            .selectAll("circle")
+            .data(data)
+            .join("circle")
+            .attr("cx", d => xScale_chart(d.x))
+            .attr("cy", d => yScale(d.y))
+            .attr("r", radius)
+            .attr("x", function(d, i) {return xScale_chart(d.x)})
+            .attr("y", function(d, i) {return yScale(d.y)})
+            .attr("stroke", "var(--info)")
+            .attr("class","point")
+            .attr("fill", function(d,j){
+                if(missing.includes(j)){
+                    return "var(--success)";
+                }else{
+                    return "white";
+                } 
+            })
+            .on("mouseover", function(event, d){
+                var tooltip = d3.select("#tooltip");
+                if(missing.includes(d.index)){
+                    var tooltipHTML = d.x.toDateString() + "<br>" +
+                                        get_time(d.x) +  "<br><strong>" +
+                                        "NO VALUE" + "</strong>";
+                } else{
+                    var tooltipHTML = d.x.toDateString() + "<br>" +
+                                        get_time(d.x) +  "<br><strong>" +
+                                        Number.parseFloat(d.y).toFixed(3) + "</strong>";
+                }
+                tooltip.html(tooltipHTML);
+                tooltip.style('left', (event.pageX+10) + 'px');
+                tooltip.style('top', (event.pageY+10) + 'px');
+                tooltip.style("visibility", "visible");
+            })
+            .on("mouseout", function(){
+                var tooltip = d3.select("#tooltip");
+                tooltip.style("visibility", "hidden");
+            });
+
+            if(transition){
+                d3.select("#plot_chart").transition().duration(500).style("opacity", 1);
+            }
+
+            // Function that updates the chart for given boundaries
+            // d3 passes the event to the function in v6 (not in v4)
+            function updateZoom(event) {
+                // What are the selected boundaries?
+                extent = event.selection;
+
+                // If no selection just return
+                if(!extent){
+                    return;
+                }else{
+                    var x1 = xScale_chart.invert(extent[0][0]);
+                    var x2 = xScale_chart.invert(extent[1][0]);
+                    radius = radiusScale(x2-x1);
+                    lineWidth = lineScale(x2-x1);
+
+                    xScale_chart.domain([xScale_chart.invert(extent[0][0]), xScale_chart.invert(extent[1][0])])
+                    yScale.domain([yScale.invert(extent[1][1]), yScale.invert(extent[0][1])])
+                    all_lines.select(".brush").call(brush.move, null) // This remove the grey brush area 
+                }
+                
+                // Update axis and line/point position etc
+                x_axis_call.transition().duration(1000).call(x_axis);
+                x_axis_grid_call.transition().duration(1000).call(xAxisGrid);
+                y_axis_call.transition().duration(1000).call(y_axis);
+                y_axis_grid_call.transition().duration(1000).call(yAxisGrid);
+                all_lines
+                    .selectAll('.chartline')
+                    .transition()
+                    .duration(1000)
+                    .attr("d", line)
+                    .attr("stroke-width", lineWidth);
+                all_lines
+                    .selectAll('circle')
+                    .transition()
+                    .duration(1000)
+                    .attr("cx", d => xScale_chart(d.x))
+                    .attr("cy", d => yScale(d.y))
+                    .attr("r", radius);
+
+                // store yScale/xScale
+                for(let i in machine_data.pressure_metrics){
+                    if(machine_data.pressure_metrics[i].display_name == display_metric){
+                        machine_data.pressure_metrics[i].yScale = yScale;  
+                        machine_data.pressure_metrics[i].xScale = xScale_chart;
+                        machine_data.pressure_metrics[i].radius = radius;
+                        machine_data.pressure_metrics[i].lineWidth = lineWidth;  
+                        break;
+                    }
+                }
+            }
+
+            // If user double click, reinitialize the chart
+            svg.on("dblclick",function(){
+                radius = base_radius;
+                lineWidth = base_line_width;
+                xScale_chart.domain([minX, maxX]);
+                yScale.domain([d3.min(y_values) - offsetY, d3.max(y_values) + offsetY]);
+                x_axis_call.transition().duration(1000).call(x_axis);
+                x_axis_grid_call.transition().duration(1000).call(xAxisGrid);
+                y_axis_call.transition().duration(1000).call(y_axis);
+                y_axis_grid_call.transition().duration(1000).call(yAxisGrid);
+                all_lines
+                    .selectAll('.chartline')
+                    .transition()
+                    .duration(1000)
+                    .attr("d",line)
+                    .attr("stroke-width", lineWidth);
+                all_lines
+                    .selectAll('circle')
+                    .transition()
+                    .duration(1000)
+                    .attr("cx", d => xScale_chart(d.x))
+                    .attr("cy", d => yScale(d.y))
+                    .attr("r", radius);
+
+                // store yScale/xScale
+                for(let i in machine_data.pressure_metrics){
+                    if(machine_data.pressure_metrics[i].display_name == display_metric){
+                        machine_data.pressure_metrics[i].yScale = yScale;  
+                        machine_data.pressure_metrics[i].xScale = xScale_chart;
+                        machine_data.pressure_metrics[i].radius = radius;
+                        machine_data.pressure_metrics[i].lineWidth = lineWidth;  
+                        break;
+                    }
+                }
+            });
+        }
+
+        function radioUpdate(event){
+
+            // update display metric
+            if(event.target.hasAttribute("type")){ // only respond to input
+
+                // disable/enable box plots for normalised
+                display_metric = event.target.labels[0].innerText;
+                if(display_metric == "Area (normalised)" || display_metric == "Height (normalised)"){
+                    document.getElementById("box").disabled = true;
+                }
+                else{
+                    document.getElementById("box").disabled = false;
+                }
+                // re draw current chart (add boxes heat)
+                if(chart_type == "line"){
+                    if(event.target.classList.contains("pressure")){
+                        metric_type = "pressure";
+                        draw_pressure_line(true);
+                    }else{
+                        metric_type = "lcms";
+                        draw_line_chart(true);
+                    }
+                }
+                else if(chart_type == "box"){
+                    yScale_box = null;
+                    if(event.target.classList.contains("pressure")){
+                        metric_type = "pressure";
+                        draw_pressure_box(true);
+                    }else{
+                        metric_type = "lcms";
+                        draw_box_plot(true);
+                    }
+                }
+            };  
+        }
+
+        function draw_pressure_box(transition){
+            // get width and height of plot area
+            var plot_area = document.getElementById("plot_chart");
+            var chart_header = document.getElementById("chart_header");
+            var chart_bottom = document.getElementById("chart_bottom");
+            var plot_height = plot_area.offsetHeight;
+            var plot_width = plot_area.offsetWidth;
+
+            // remove any elements in plot area
+            while (plot_area.firstChild) {
+                plot_area.removeChild(plot_area.firstChild);
+            }
+            
+            if(transition){
+                plot_area.style.opacity = 0;
+                chart_header.innerHTML = display_metric.toUpperCase();
+            }
+
+            // x values
+            var run_values = machine_data.run_data
+            var x_values = [];
+            for(let run in run_values){
+                x_values.push(run_values[run].date_time);
+            }
+
+            // y values and missing indexes
+            var data= [];
+            for(let i in machine_data.pressure_metrics){
+                if(machine_data.pressure_metrics[i].display_name == display_metric){
+                    var new_obj = machine_data.pressure_metrics[i].stats;
+                    new_obj["missing"] = machine_data.pressure_metrics[i].missing;
+                    new_obj["current"] = machine_data.pressure_metrics[i].values[run_index];
+                    data.push(new_obj);
+                    break;
+                }
+            };
+
+            // set the dimensions and margins of the plot
+            var margin = {top: 10, right: 10, bottom: 20, left: 50};
+            var width = plot_width - margin.left - margin.right;
+            box_area_height = plot_height - margin.top - margin.bottom;
+            
+            // boxwidth
+            var box_padding = 10;
+            var box_width = width/4;
+
+            // append the svg object to the plot area
+            var svg = d3.select("#plot_chart")
+            .append("svg")
+                .attr("width", plot_width)
+                .attr("height", plot_height)
+            .append("g")
+                .attr("transform",
+                    "translate(" + margin.left + "," + margin.top + ")");
+
+            // x scale
+            xScale_box = d3.scaleBand()
+                .range([0, width])
+                .domain([display_metric])
+                .paddingInner(1)  // between
+                .paddingOuter(0.5); // before and after
+
+            // x-axis 
+            var x_axis = d3.axisBottom().scale(xScale_box).tickValues([]).tickSizeOuter(0);
+
+            // x-axis-call
+            var x_axis_call = svg.append("g")
+            .attr("transform", "translate(0," + box_area_height + ")")
+            .attr("class", "axis-chart")
+            .call(x_axis);
+
+            // y-scale
+            // set at outlier limit
+            var IQR = data[0]["75_percent"] - data[0]["25_percent"];
+            yScale_box = d3.scaleLinear()
+                .domain([data[0]["25_percent"] - IQR , data[0]["75_percent"] + IQR])
+                .range([box_area_height, 0]);
+            
+            // y-axis
+            var y_axis = d3.axisLeft().scale(yScale_box)
+            .tickSize(2).tickSizeOuter(0);
+
+            // y-axis calls
+            var y_axis_call = svg.append("g")
+                .attr("class", "axis-chart")
+                .call(y_axis);
+            
+            // grid y
+            var yAxisGrid = d3.axisLeft().scale(yScale_box).
+            tickSize(-width).tickFormat('').tickSizeOuter(0);
+
+            // grid y call
+            var y_axis_grid_call = svg.append("g")
+            .attr('class', 'axis-grid')
+            .call(yAxisGrid);
+
+            // ylabel
+            svg.append("text")
+            .attr("transform", "rotate(-90)")
+            .attr("class", "label")
+            .attr("y", 5 - margin.left)
+            .attr("x",0 - (box_area_height / 2))
+            .attr("dy", "1em")
+            .style("text-anchor", "middle")
+            .text("BARS");
+
+            // add the box
+            svg
+            .selectAll("boxes")
+            .data(data)
+            .enter()
+            .append("rect")
+                .attr("x", function(d){return(xScale_box(display_metric)- box_width/2)})
+                .attr("y", function(d){return(yScale_box(d["75_percent"]))})
+                .attr("height", function(d){return(yScale_box(d["25_percent"])-yScale_box(d["75_percent"]))})
+                .attr("width", box_width)
+                .attr("stroke", "var(--info)")
+                .attr("stroke-width", "2px")
+                .style("fill", "var(--info)")
+                .style("fill-opacity", 1)
+                .on("mouseover", function(event, d){
+                    // tooltip
+                    var tooltip = d3.select("#tooltip");
+                    var tooltipHTML = "<strong>" + display_metric + "</strong><br>" +
+                                    "<strong>Q1 </strong>" + d["25_percent"].toFixed(3) + "<br>" +
+                                    "<strong>Q3 </strong>" + d["75_percent"].toFixed(3) + "<br>" +
+                                    "<strong>Median </strong>" + d["50_percent"].toFixed(3) + "<br>" +
+                                    "<strong>Mean </strong>" + d["mean"].toFixed(3);
+                                        
+                    tooltip.html(tooltipHTML);
+                    tooltip.style('left', (event.pageX+30) + 'px');
+                    tooltip.style('top', (event.pageY+10) + 'px');
+                    tooltip.style("visibility", "visible");
+                })
+                .on("mouseout", function(event, d){
+                    var tooltip = d3.select("#tooltip");
+                    tooltip.style("visibility", "hidden");
+                });
+
+            // median
+            svg
+            .selectAll("medianLines")
+            .data(data)
+            .enter()
+            .append("line")
+            .attr("x1", function(d){return(xScale_box(display_metric)-box_width/2) })
+            .attr("x2", function(d){return(xScale_box(display_metric)+box_width/2) })
+            .attr("y1", function(d){return(yScale_box(d["50_percent"]))})
+            .attr("y2", function(d){return(yScale_box(d["50_percent"]))})
+            .attr("stroke", "white");
+
+             // mean
+             svg
+            .selectAll("meanLines")
+            .data(data)
+            .enter()
+            .append("line")
+            .attr("x1", function(d){return(xScale_box(display_metric)-box_width/2) })
+            .attr("x2", function(d){return(xScale_box(display_metric)+box_width/2) })
+            .attr("y1", function(d){return(yScale_box(d["mean"]))})
+            .attr("y2", function(d){return(yScale_box(d["mean"]))})
+            .attr("stroke", "white")
+            .style("stroke-dasharray", ("3, 3"));
+
+            // current run
+            svg
+            .selectAll("currentRun")
+            .data(data)
+            .enter()
+            .append("circle")
+            .attr("cx", d => xScale_box(display_metric))
+            .attr("cy", function(d){
+                    // cap so does not go off chart
+                    if(yScale_box(d.current) > box_area_height){
+                        return box_area_height;
+                    }
+                    if(yScale_box(d.current)<0){
+                        return 0;
+                    }
+                    
+                    return yScale_box(d.current)
+                })
+            .attr("r", box_radius)
+            .attr("x", function(d, i) {return xScale_box(display_metric)})
+            .attr("y", function(d){
+                    // cap so does not go off chart
+                    if(yScale_box(d.current) > box_area_height){
+                        return  box_area_height;
+                    }
+                    if(yScale_box(d.current)<0){
+                        return 0;
+                    }
+                    
+                    return yScale_box(d.current)
+                })
+            .attr("stroke", "var(--info)")
+            .attr("stroke-width", 2)
+            .attr("class","point")
+            .attr("fill", function(d,j){
+                var miss = d.missing;
+                if(miss.includes(run_index)){
+                    return "black";
+                }
+                else if(yScale_box(d.current) > box_area_height){
+                        return  "var(--info)";
+                    }
+                else if(yScale_box(d.current)<0){
+                    return "var(--info)";
+                }
+                else{
+                    return "whitesmoke";
+                }
+            })
+            .on("mouseover", function(event, d){ // tooltip on hover
+                var tooltip = d3.select("#tooltip");
+                var miss = d.missing;
+                if(miss.includes(run_index)){
+                    var tooltipHTML = "<strong>" + display_metric.replace("_", " ") + 
+                                    "</strong><br>" + machine_data.run_data[run_index].date_time.toDateString() + "<br>" +
+                                        get_time(machine_data.run_data[run_index].date_time) +  "<br><strong>" +
+                                        "NO VALUE" + "</strong>";
+                } else{
+                    var tooltipHTML = "<strong>" +  display_metric.replace("_", " ")  + 
+                                    "</strong><br>" + machine_data.run_data[run_index].date_time.toDateString() + "<br>" +
+                                        get_time(machine_data.run_data[run_index].date_time) +  "<br><strong>" +
+                                        Number.parseFloat(d.current).toFixed(3) + "</strong>";
+                }
+                tooltip.html(tooltipHTML);
+                tooltip.style('left', (event.pageX+30) + 'px');
+                tooltip.style('top', (event.pageY+10) + 'px');
+                tooltip.style("visibility", "visible");
+            })
+            .on("mouseout", function(){
+                var tooltip = d3.select("#tooltip");
+                tooltip.style("visibility", "hidden");
+            })
+
+            // extender
+            svg
+            .selectAll("extenders")
+            .data(data)
+            .enter()
+            .append("line")
+            .attr("x1", function(d){return(xScale_box(display_metric))})
+            .attr("x2", function(d){return(xScale_box(display_metric))})
+            .attr("y1", function(d){
+                var y1;
+                if(d.current >= d["75_percent"]){
+                    y1 = yScale_box(d.current);
+                }
+                else if(d.current <= d["25_percent"]){
+                    y1 = yScale_box(d["25_percent"]);
+                }
+                else{
+                    y1 =  yScale_box(d.current);
+                }
+
+                // cap so does not go off chart
+                if(y1 < 0){
+                    return 0;
+                }
+                return y1;
+            })
+            .attr("y2", function(d){
+                var y2;
+                if(d.current >= d["75_percent"]){
+                    y2 = yScale_box(d["75_percent"]);
+                }
+                else if(d.current <= d["25_percent"]){
+                    y2 = yScale_box(d.current);
+                }
+                else{
+                    y2 = yScale_box(d.current);
+                }
+                // cap so does not go off chart
+                if(y2 > box_area_height){
+                    return box_area_height;
+                }
+                return y2;
+            })
+            .attr("stroke", "var(--info)")
+            .attr("stroke-width", 2)
+            .attr("class", "extender");
+
+            if(transition){
+                d3.select("#plot_chart").transition().duration(500).style("opacity", 1);
+            }
+        }
+
+        function getThresholds(){
+            var thresholds = {};
+            var threshold_metrics = ["Mass Error (ppm)"] // only displayable thresholds at the moment
+            if(!threshold_metrics.includes(display_metric)){
+                return thresholds;
+            }
+
+            // get threshold markers
+            for(let i in machine_data["lcms_metrics"]){
+                if(machine_data["lcms_metrics"][i].display_name == display_metric){
+                   thresholds = machine_data["lcms_metrics"][i]["thresholds"];
+                }
+            };
+            return thresholds;
+        }
+
+    </script>
+</head>

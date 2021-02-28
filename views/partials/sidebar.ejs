@@ -1,0 +1,85 @@
+<!-- Sidebar/menu -->
+<div class="w3-indigo w3-top w3-medium w3-padding w3-wide w3-sidebar" style="display:block;z-index:3;width:21.5em;font-weight:bold;" id="mySidebar"><br>
+  <!--<a href="javascript:void(0)" onclick="w3_close()" class="w3-button w3-hide-large w3-display-topleft" style="width:100%;font-size:22px">Close Menu</a>-->
+  <div class="w3-center">
+  <img  src="images\logo-monash.png" alt="Monash University" class="w3-image"> 
+</div>
+  <!--Title-->
+  <div class="w3-container">
+      <h3 class="w3-padding-16 w3-center" style="text-shadow:5px 5px 0 #444"><b><%= title %> QUALITY CONTROL</b></h3>
+      
+      <button class="w3-button w3-dark-gray w3-border w3-block w3-round-large" onclick="changePage()">View <%= change_title %></button>
+    </div>
+  </br>
+  <!--Drop down for all charts control
+  <div class="w3-container">
+      
+    <button onclick="dropdown('allCharts')" class="w3-btn w3-block w3-black w3-round">All Charts 
+        <i class="fa fa-line-chart"></i></button>
+        
+      <div id="allCharts" class="w3-container w3-hide">
+        <div id="allChartsMenu" class="w3-container w3-light-gray">
+          </br>
+            
+          </br>
+        </br>
+          
+            </div> 
+        </div> 
+      </div> 
+
+-->
+
+  <!--Drop down for venue selection-->
+  <div class="w3-container">
+    <button onclick="dropdown('venue')" class="w3-btn w3-block w3-black  w3-round">Venue</button>
+      <div id="venue" class="w3-container w3-hide">
+          <% for(var i=0; i < v_venues.length; i++) { %>
+            <button class="w3-btn w3-block w3-light-gray" onclick="change(this)"><%=v_venues[i]%></button>
+          <%}%>
+  </div>
+  </div>
+</br>
+<!--Drop down for machine-->
+  <div class="w3-container">
+    <button onclick="dropdown('machine')" class="w3-btn w3-block w3-black  w3-round">Machine</button>
+      <div id="machine" class="w3-container w3-hide">
+      
+  </div>
+  </div>
+</br>
+ 
+
+  <!--Metrics-->
+  <div class="w3-bar-block" id="MS">
+  <a href="#" class="w3-bar-item w3-btn w3-center"><%=v_metrics[0]%></a>
+	<% for(var i=1; i < v_metrics.length; i++) { %>
+		<a href="#<%=v_metrics[i]%>" class="w3-bar-item w3-btn w3-center"><%=v_metrics[i]%></a>
+	<%}%>
+  </div>
+</br>
+</br>
+</div>
+
+<!-- Top menu on small screens , check for drop down
+<header class="w3-container w3-top w3-hide-large w3-indigo w3-xlarge w3-padding">
+  <a href="javascript:void(0)" class="w3-button w3-indigo w3-margin-right" onclick="w3_open()"></a>
+  <span><%= title %></span>
+</header>
+-->
+
+<!-- Overlay effect when opening sidebar on small screens -->
+<div class="w3-overlay w3-hide-large" onclick="w3_close()" style="cursor:pointer" title="close side menu" id="myOverlay"></div>
+
+<!-- Top/menu -->
+<!-- Header -->
+<div class="w3-top" style="z-index:5;">
+  <div class="w3-panel w3-light-grey headerBorder" style="margin-top:0em; margin-left: 21.5em; margin-right: 0em;">
+    <h1 class="w3-large w3-center w3-dark-gray"  style="text-shadow:1px 1px 0 #444"><b><%= title %> QUALITY CONTROL</b></h1>
+    <div class="header">
+      <span class="w3-large w3-text-dark-gray"><strong>Venue: </strong><span id="venueHeader"></span></span>
+      <span class="w3-xlarge w3-center w3-bold w3-text-dark-gray" id="viewLabel"></span>
+      <span class="w3-large w3-text-dark-gray" style="right:0;"><strong>Machine: </strong><span id="machineHeader"></span></span>
+    </div>
+  </div>
+</div>
